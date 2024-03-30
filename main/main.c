@@ -147,7 +147,7 @@ typedef struct decoderData_s {
                   // or SNAPCAST_MESSAGE_WIRE_CHUNK
   uint8_t *inData;
   tv_t timestamp;
-  pcm_chunk_message_t *outData;
+  uint8_t *outData;
   uint32_t bytes;
 } decoderData_t;
 
@@ -166,6 +166,22 @@ struct netconn *lwipNetconn;
 static int id_counter = 0;
 
 static OpusDecoder *opusDecoder = NULL;
+
+static decoderData_t decoderChunk = {
+    .type = SNAPCAST_MESSAGE_INVALID,
+    .inData = NULL,
+    .timestamp = {0, 0},
+    .outData = NULL,
+    .bytes = 0,
+};
+
+static decoderData_t pcmChunk = {
+    .type = SNAPCAST_MESSAGE_INVALID,
+    .inData = NULL,
+    .timestamp = {0, 0},
+    .outData = NULL,
+    .bytes = 0,
+};
 
 /**
  *
@@ -278,42 +294,59 @@ static FLAC__StreamDecoderReadStatus read_callback(
 
   (void)scSet;
 
-  xQueueReceive(decoderReadQHdl, &flacData, portMAX_DELAY);
+  // xQueueReceive(decoderReadQHdl, &flacData, portMAX_DELAY);
+  // if (xQueueReceive(decoderReadQHdl, &flacData, pdMS_TO_TICKS(100)))
+  if (decoderChunk.inData) {
+    //	   ESP_LOGI(TAG, "in flac read cb %ld %p", flacData->bytes,
+    // flacData->inData);
 
-  // ESP_LOGI(TAG, "in flac read cb %d %p", flacData->bytes, flacData->inData);
+    if (decoderChunk.bytes <= 0) {
+      //	    free_flac_data(flacData);
 
-  if (flacData->bytes <= 0) {
-    free_flac_data(flacData);
+      return FLAC__STREAM_DECODER_READ_STATUS_END_OF_STREAM;
+    }
 
+    //	  if (flacData->inData == NULL) {
+    //	    free_flac_data(flacData);
+    //
+    //	    return FLAC__STREAM_DECODER_READ_STATUS_ABORT;
+    //	  }
+
+    if (decoderChunk.bytes <= *bytes) {
+      memcpy(buffer, decoderChunk.inData, decoderChunk.bytes);
+      *bytes = decoderChunk.bytes;
+
+      //	    ESP_LOGW(TAG, "read all flac inData %d", *bytes);
+
+      free(decoderChunk.inData);
+      decoderChunk.inData = NULL;
+      decoderChunk.bytes = 0;
+    } else {
+      memcpy(buffer, decoderChunk.inData, *bytes);
+
+      memmove(decoderChunk.inData, decoderChunk.inData + *bytes,
+              decoderChunk.bytes - *bytes);
+      decoderChunk.bytes -= *bytes;
+      decoderChunk.inData =
+          (uint8_t *)realloc(decoderChunk.inData, decoderChunk.bytes);
+
+      ESP_LOGW(TAG, "dind't read all flac inData %d", *bytes);
+      //	    flacData->inData += *bytes;
+      //	    flacData->bytes -= *bytes;
+    }
+
+    // free_flac_data(flacData);
+
+    // xQueueSend (flacReadQHdl, &flacData, portMAX_DELAY);
+
+    // xSemaphoreGive(decoderReadSemaphore);
+
+    // ESP_LOGE(TAG, "%s: data processed", __func__);
+
+    return FLAC__STREAM_DECODER_READ_STATUS_CONTINUE;
+  } else {
     return FLAC__STREAM_DECODER_READ_STATUS_END_OF_STREAM;
   }
-
-  if (flacData->inData == NULL) {
-    free_flac_data(flacData);
-
-    return FLAC__STREAM_DECODER_READ_STATUS_ABORT;
-  }
-
-  if (flacData->bytes <= *bytes) {
-    memcpy(buffer, flacData->inData, flacData->bytes);
-    *bytes = flacData->bytes;
-    //      ESP_LOGW(TAG, "read all flac inData %d", *bytes);
-  } else {
-    memcpy(buffer, flacData->inData, *bytes);
-    // ESP_LOGW(TAG, "dind't read all flac inData %d", *bytes);
-    flacData->inData += *bytes;
-    flacData->bytes -= *bytes;
-  }
-
-  free_flac_data(flacData);
-
-  // xQueueSend (flacReadQHdl, &flacData, portMAX_DELAY);
-
-  // xSemaphoreGive(decoderReadSemaphore);
-
-  // ESP_LOGE(TAG, "%s: data processed", __func__);
-
-  return FLAC__STREAM_DECODER_READ_STATUS_CONTINUE;
 }
 
 /**
@@ -323,10 +356,12 @@ static FLAC__StreamDecoderWriteStatus write_callback(
     const FLAC__StreamDecoder *decoder, const FLAC__Frame *frame,
     const FLAC__int32 *const buffer[], void *client_data) {
   size_t i;
-  decoderData_t *flacData = NULL;  // = &flacOutData;
+  decoderData_t *flacData = NULL;
   snapcastSetting_t *scSet = (snapcastSetting_t *)client_data;
   int ret = 0;
   uint32_t fragmentCnt = 0;
+  size_t bytes = frame->header.blocksize * frame->header.channels *
+                 frame->header.bits_per_sample / 8;
 
   (void)decoder;
 
@@ -334,8 +369,8 @@ static FLAC__StreamDecoderWriteStatus write_callback(
 
   // xQueueReceive (flacReadQHdl, &flacData, portMAX_DELAY);
 
-  //    ESP_LOGI(TAG, "in flac write cb %d %p", frame->header.blocksize,
-  //    flacData);
+  //  ESP_LOGI(TAG, "in flac write cb %ld %d, pcmChunk.bytes %ld",
+  //  frame->header.blocksize, bytes, pcmChunk.bytes);
 
   if (frame->header.channels != scSet->ch) {
     ESP_LOGE(TAG,
@@ -352,70 +387,91 @@ static FLAC__StreamDecoderWriteStatus write_callback(
     return FLAC__STREAM_DECODER_WRITE_STATUS_ABORT;
   }
   if (buffer[0] == NULL) {
-    ESP_LOGE(TAG, "ERROR: buffer [0] is NULL\n");
+    ESP_LOGE(TAG, "ERROR: buffer [0] is NULL");
     return FLAC__STREAM_DECODER_WRITE_STATUS_ABORT;
   }
   if (buffer[1] == NULL) {
-    ESP_LOGE(TAG, "ERROR: buffer [1] is NULL\n");
+    ESP_LOGE(TAG, "ERROR: buffer [1] is NULL");
     return FLAC__STREAM_DECODER_WRITE_STATUS_ABORT;
   }
 
-  flacData = (decoderData_t *)malloc(sizeof(decoderData_t));
-  if (flacData == NULL) {
+  pcmChunk.outData =
+      (uint8_t *)realloc(pcmChunk.outData, pcmChunk.bytes + bytes);
+  if (!pcmChunk.outData) {
+    ESP_LOGE(TAG, "%s, failed to allocate PCM chunk payload", __func__);
     return FLAC__STREAM_DECODER_WRITE_STATUS_ABORT;
   }
 
-  memset(flacData, 0, sizeof(decoderData_t));
-
-  flacData->bytes = frame->header.blocksize * frame->header.channels *
-                    (frame->header.bits_per_sample / 8);
-
-  ret = allocate_pcm_chunk_memory(&(flacData->outData), flacData->bytes);
-
-  //   ESP_LOGI (TAG, "mem %p %p %d", flacData->outData,
-  //   flacData->outData->fragment->payload, flacData->bytes);
-
-  if (ret == 0) {
-    pcm_chunk_fragment_t *fragment = flacData->outData->fragment;
-
-    if (fragment->payload != NULL) {
-      fragmentCnt = 0;
-
-      for (i = 0; i < frame->header.blocksize; i++) {
-        // write little endian
-        // flacData->outData[4 * i] = (uint8_t)buffer[0][i];
-        // flacData->outData[4 * i + 1] = (uint8_t) (buffer[0][i] >> 8);
-        // flacData->outData[4 * i + 2] = (uint8_t)buffer[1][i];
-        // flacData->outData[4 * i + 3] = (uint8_t)(buffer[1][i] >> 8);
-
-        // TODO: for now fragmented payload is not supported and the whole
-        // chunk is expected to be in the first fragment
-        uint32_t tmpData;
-        tmpData = ((uint32_t)((buffer[0][i] >> 8) & 0xFF) << 24) |
-                  ((uint32_t)((buffer[0][i] >> 0) & 0xFF) << 16) |
-                  ((uint32_t)((buffer[1][i] >> 8) & 0xFF) << 8) |
-                  ((uint32_t)((buffer[1][i] >> 0) & 0xFF) << 0);
-
-        if (fragment != NULL) {
-          volatile uint32_t *test =
-              (volatile uint32_t *)(&(fragment->payload[fragmentCnt]));
-          *test = (volatile uint32_t)tmpData;
-        }
-
-        fragmentCnt += 4;
-        if (fragmentCnt >= fragment->size) {
-          fragmentCnt = 0;
-
-          fragment = fragment->nextFragment;
-        }
-      }
-    }
+  for (i = 0; i < frame->header.blocksize; i++) {
+    // write little endian
+    pcmChunk.outData[pcmChunk.bytes + 4 * i] = (uint8_t)(buffer[0][i]);
+    pcmChunk.outData[pcmChunk.bytes + 4 * i + 1] = (uint8_t)(buffer[0][i] >> 8);
+    pcmChunk.outData[pcmChunk.bytes + 4 * i + 2] = (uint8_t)(buffer[1][i]);
+    pcmChunk.outData[pcmChunk.bytes + 4 * i + 3] = (uint8_t)(buffer[1][i] >> 8);
   }
+
+  pcmChunk.bytes += bytes;
+
+  scSet->chkInFrames = frame->header.blocksize;
+
+  //  flacData = (decoderData_t *)malloc(sizeof(decoderData_t));
+  //  if (flacData == NULL) {
+  //    return FLAC__STREAM_DECODER_WRITE_STATUS_ABORT;
+  //  }
+  //
+  //  memset(flacData, 0, sizeof(decoderData_t));
+  //
+  //  flacData->bytes = frame->header.blocksize * frame->header.channels *
+  //                    (frame->header.bits_per_sample / 8);
+  //
+  //  ret = allocate_pcm_chunk_memory(&(flacData->outData), flacData->bytes);
+  //
+  ////  ESP_LOGW (TAG, "block size: %ld", frame->header.blocksize);
+  //
+  //  //   ESP_LOGI (TAG, "mem %p %p %d", flacData->outData,
+  //  //   flacData->outData->fragment->payload, flacData->bytes);
+  //
+  //  if (ret == 0) {
+  //    pcm_chunk_fragment_t *fragment = flacData->outData->fragment;
+  //
+  //    if (fragment->payload != NULL) {
+  //      fragmentCnt = 0;
+  //
+  //      for (i = 0; i < frame->header.blocksize; i++) {
+  //        // write little endian
+  //        // flacData->outData[4 * i] = (uint8_t)buffer[0][i];
+  //        // flacData->outData[4 * i + 1] = (uint8_t) (buffer[0][i] >> 8);
+  //        // flacData->outData[4 * i + 2] = (uint8_t)buffer[1][i];
+  //        // flacData->outData[4 * i + 3] = (uint8_t)(buffer[1][i] >> 8);
+  //
+  //        // TODO: for now fragmented payload is not supported and the whole
+  //        // chunk is expected to be in the first fragment
+  //        uint32_t tmpData;
+  //        tmpData = ((uint32_t)((buffer[0][i] >> 8) & 0xFF) << 24) |
+  //                  ((uint32_t)((buffer[0][i] >> 0) & 0xFF) << 16) |
+  //                  ((uint32_t)((buffer[1][i] >> 8) & 0xFF) << 8) |
+  //                  ((uint32_t)((buffer[1][i] >> 0) & 0xFF) << 0);
+  //
+  //        if (fragment != NULL) {
+  //          volatile uint32_t *test =
+  //              (volatile uint32_t *)(&(fragment->payload[fragmentCnt]));
+  //          *test = (volatile uint32_t)tmpData;
+  //        }
+  //
+  //        fragmentCnt += 4;
+  //        if (fragmentCnt >= fragment->size) {
+  //          fragmentCnt = 0;
+  //
+  //          fragment = fragment->nextFragment;
+  //        }
+  //      }
+  //    }
+  //  }
   //  else {
   //    flacData->outData = NULL;
   //  }
 
-  xQueueSend(decoderWriteQHdl, &flacData, portMAX_DELAY);
+  //  xQueueSend(decoderWriteQHdl, &flacData, portMAX_DELAY);
 
   // ESP_LOGE(TAG, "%s: data processed", __func__);
 
@@ -438,16 +494,16 @@ void metadata_callback(const FLAC__StreamDecoder *decoder,
   // xQueueReceive (flacReadQHdl, &flacData, portMAX_DELAY);
 
   if (metadata->type == FLAC__METADATA_TYPE_STREAMINFO) {
-    //		ESP_LOGI(TAG, "in flac meta cb");
+    // ESP_LOGI(TAG, "in flac meta cb");
 
-    flacData = (decoderData_t *)malloc(sizeof(decoderData_t));
-    if (flacData == NULL) {
-      ESP_LOGE(TAG, "in flac meta cb, malloc failed");
-
-      return;
-    }
-
-    memset(flacData, 0, sizeof(decoderData_t));
+    //    flacData = (decoderData_t *)malloc(sizeof(decoderData_t));
+    //    if (flacData == NULL) {
+    //      ESP_LOGE(TAG, "in flac meta cb, malloc failed");
+    //
+    //      return;
+    //    }
+    //
+    //    memset(flacData, 0, sizeof(decoderData_t));
 
     // save for later
     scSet->sr = metadata->data.stream_info.sample_rate;
@@ -457,7 +513,7 @@ void metadata_callback(const FLAC__StreamDecoder *decoder,
     ESP_LOGI(TAG, "fLaC sampleformat: %ld:%d:%d", scSet->sr, scSet->bits,
              scSet->ch);
 
-    xQueueSend(decoderWriteQHdl, &flacData, portMAX_DELAY);
+    // xQueueSend(decoderWriteQHdl, &flacData, portMAX_DELAY);
 
     // ESP_LOGE(TAG, "%s: data processed", __func__);
   }
@@ -476,6 +532,9 @@ void error_callback(const FLAC__StreamDecoder *decoder,
            FLAC__StreamDecoderErrorStatusString[status]);
 }
 
+/**
+ *
+ */
 static void flac_decoder_task(void *pvParameters) {
   //  FLAC__bool ok = true;
   FLAC__StreamDecoderInitStatus init_status;
@@ -510,6 +569,22 @@ static void flac_decoder_task(void *pvParameters) {
   }
 }
 
+/*
+ * Add one timeval to another.
+ */
+tv_t timeval_add(tv_t *a, tv_t *b) {
+  tv_t result;
+
+  result.sec = a->sec + b->sec;
+  result.usec = a->usec + b->usec;
+  if (result.usec >= 1000000) {
+    result.sec += 1;
+    result.usec -= 1000000;
+  }
+
+  return result;
+}  // timeval_add
+
 /**
  *
  */
@@ -517,14 +592,42 @@ void flac_task(void *pvParameters) {
   tv_t currentTimestamp;
   decoderData_t *pFlacData = NULL;
   snapcastSetting_t *scSet = (snapcastSetting_t *)pvParameters;
+  FLAC__StreamDecoderInitStatus init_status;
+
+  if (flacDecoder != NULL) {
+    FLAC__stream_decoder_finish(flacDecoder);
+    FLAC__stream_decoder_delete(flacDecoder);
+    flacDecoder = NULL;
+  }
+
+  flacDecoder = FLAC__stream_decoder_new();
+  if (flacDecoder == NULL) {
+    ESP_LOGE(TAG, "Failed to init flac decoder");
+    return;
+  }
+
+  init_status = FLAC__stream_decoder_init_stream(
+      flacDecoder, read_callback, NULL, NULL, NULL, NULL, write_callback,
+      metadata_callback, error_callback, scSet);
+  if (init_status != FLAC__STREAM_DECODER_INIT_STATUS_OK) {
+    ESP_LOGE(TAG, "ERROR: initializing decoder: %s\n",
+             FLAC__StreamDecoderInitStatusString[init_status]);
+
+    //    ok = false;
+
+    return;
+  }
 
   while (1) {
     xQueueReceive(decoderTaskQHdl, &pFlacData,
-                  portMAX_DELAY);  // get data from tcp task
+                  portMAX_DELAY);  // get data from http task
 
     if (pFlacData != NULL) {
       currentTimestamp = pFlacData->timestamp;
 
+      //      ESP_LOGE(TAG, "Got data with length %ld", pFlacData->bytes);
+
+      //      ESP_LOGE(TAG, "1");
       //      ESP_LOGE(TAG, "Got timestamp %lld",
       //               (uint64_t)currentTimestamp.sec * 1000000 +
       //                   (uint64_t)currentTimestamp.usec);
@@ -535,6 +638,7 @@ void flac_task(void *pvParameters) {
       // ESP_LOGE(TAG, "%s: decoderReadQHdl start", __func__);
 
       xQueueSend(decoderReadQHdl, &pFlacData, portMAX_DELAY);
+      //      ESP_LOGE(TAG, "2");
 
       // ESP_LOGE(TAG, "%s: decoderReadQHdl done", __func__);
       // and wait until data was
@@ -546,56 +650,137 @@ void flac_task(void *pvParameters) {
 
       //      free(pFlacData->inData);
       //      free(pFlacData);
-    } else {
-      pcm_chunk_message_t *pcmData = NULL;
+      //    }
+      //    else
+      //    {
+      uint64_t frameCounter = 0;
 
-      //      xSemaphoreGive(decoderWriteSemaphore);
-      // and wait until it is done
-      // ESP_LOGE(TAG, "%s: decoderWriteQHdl start", __func__);
+      if (FLAC__stream_decoder_process_until_end_of_stream(flacDecoder) ==
+          false) {
+        // if (FLAC__stream_decoder_process_single(flacDecoder) == false) {
+        ESP_LOGE(TAG, "%s: decoder error", __func__);
+      }
+      // else {
+      //   ESP_LOGW(TAG, "%s: decoder done", __func__);
+      //}
 
-      xQueueReceive(decoderWriteQHdl, &pFlacData, portMAX_DELAY);
+      while (xQueueReceive(decoderWriteQHdl, &pFlacData, pdMS_TO_TICKS(10))) {
+        pcm_chunk_message_t *pcmData = NULL;
 
-      // ESP_LOGE(TAG, "%s: decoderWriteQHdl done", __func__);
+        //		  ESP_LOGE(TAG, "3");
 
-      if (pFlacData->outData != NULL) {
-        pcmData = pFlacData->outData;
-        pcmData->timestamp = currentTimestamp;
+        if (pFlacData->outData != NULL) {
+          pcmData = pFlacData->outData;
 
-        size_t decodedSize = pcmData->totalSize;  // pFlacData->bytes;
-        scSet->chkInFrames =
-            decodedSize / ((size_t)scSet->ch * (size_t)(scSet->bits / 8));
-        if (player_send_snapcast_setting(scSet) != pdPASS) {
-          ESP_LOGE(TAG,
-                   "Failed to "
-                   "notify "
-                   "sync task "
-                   "about "
-                   "codec. Did you "
-                   "init player?");
+          size_t decodedSize = pcmData->totalSize;  // pFlacData->bytes;
+          scSet->chkInFrames =
+              decodedSize / ((size_t)scSet->ch * (size_t)(scSet->bits / 8));
 
-          return;
-        }
+          tv_t chunkDuration = {
+              .sec = 0,
+              .usec =
+                  (frameCounter * 1000000ULL * (uint64_t)scSet->chkInFrames) /
+                  scSet->sr,
+          };
+          pcmData->timestamp = currentTimestamp =
+              timeval_add(&currentTimestamp, &chunkDuration);
+
+          frameCounter++;
+
+          // ESP_LOGI(TAG, "%s: got one frame of size %ld, timestamp %ld.%ld",
+          // __func__, scSet->chkInFrames, currentTimestamp.sec,
+          // currentTimestamp.usec);
+
+          // ESP_LOGW(TAG, "got FLAC decoded chunk size: %ld frames",
+          // scSet->chkInFrames);
+
+          if (player_send_snapcast_setting(scSet) != pdPASS) {
+            ESP_LOGE(TAG,
+                     "Failed to "
+                     "notify "
+                     "sync task "
+                     "about "
+                     "codec. Did you "
+                     "init player?");
+
+            return;
+          }
 
 #if CONFIG_USE_DSP_PROCESSOR
-        dsp_processor_worker(pcmData->fragment->payload,
-                             pcmData->fragment->size, scSet->sr);
+          dsp_processor_worker(pcmData->fragment->payload,
+                               pcmData->fragment->size, scSet->sr);
 #endif
 
-        insert_pcm_chunk(pcmData);
+          insert_pcm_chunk(pcmData);
 
-        if (pFlacData->inData) {
-          free(pFlacData->inData);
-          pFlacData->inData = NULL;
-        }
+          if (pFlacData->inData) {
+            free(pFlacData->inData);
+            pFlacData->inData = NULL;
+          }
 
-        if (pFlacData) {
-          free(pFlacData);
-          pFlacData = NULL;
+          if (pFlacData) {
+            free(pFlacData);
+            pFlacData = NULL;
+          }
+        } else {
+          free_flac_data(pFlacData);
         }
-      } else {
-        free_flac_data(pFlacData);
       }
     }
+    //    else {
+    //      pcm_chunk_message_t *pcmData = NULL;
+    //
+    //      //      xSemaphoreGive(decoderWriteSemaphore);
+    //      // and wait until it is done
+    //      // ESP_LOGE(TAG, "%s: decoderWriteQHdl start", __func__);
+    //
+    //      xQueueReceive(decoderWriteQHdl, &pFlacData, portMAX_DELAY);
+    //
+    //      // ESP_LOGE(TAG, "%s: decoderWriteQHdl done", __func__);
+    //
+    //      if (pFlacData->outData != NULL) {
+    //        pcmData = pFlacData->outData;
+    //        pcmData->timestamp = currentTimestamp;
+    //
+    //        size_t decodedSize = pcmData->totalSize;  // pFlacData->bytes;
+    //        scSet->chkInFrames =
+    //            decodedSize / ((size_t)scSet->ch * (size_t)(scSet->bits / 8));
+    //
+    //        ESP_LOGW(TAG, "got FLAC decoded chunk size: %ld frames",
+    //        scSet->chkInFrames);
+    //
+    //        if (player_send_snapcast_setting(scSet) != pdPASS) {
+    //          ESP_LOGE(TAG,
+    //                   "Failed to "
+    //                   "notify "
+    //                   "sync task "
+    //                   "about "
+    //                   "codec. Did you "
+    //                   "init player?");
+    //
+    //          return;
+    //        }
+    //
+    // #if CONFIG_USE_DSP_PROCESSOR
+    //        dsp_processor_worker(pcmData->fragment->payload,
+    //                             pcmData->fragment->size, scSet->sr);
+    // #endif
+    //
+    //        insert_pcm_chunk(pcmData);
+    //
+    //        if (pFlacData->inData) {
+    //          free(pFlacData->inData);
+    //          pFlacData->inData = NULL;
+    //        }
+    //
+    //        if (pFlacData) {
+    //          free(pFlacData);
+    //          pFlacData = NULL;
+    //        }
+    //      } else {
+    //        free_flac_data(pFlacData);
+    //      }
+    //    }
   }
 }
 
@@ -635,6 +820,9 @@ void opus_decoder_task(void *pvParameters) {
         }
 
         scSet->chkInFrames = samples_per_frame;
+
+        ESP_LOGW(TAG, "got OPUS decoded chunk size: %ld frames",
+                 scSet->chkInFrames);
 
         size_t bytes = samples_per_frame * scSet->ch * scSet->bits / 8;
 
@@ -787,10 +975,10 @@ static void http_get_task(void *pvParameters) {
       opusDecoder = NULL;
     }
 
-    if (t_flac_decoder_task != NULL) {
-      vTaskDelete(t_flac_decoder_task);
-      t_flac_decoder_task = NULL;
-    }
+    //    if (t_flac_decoder_task != NULL) {
+    //      vTaskDelete(t_flac_decoder_task);
+    //      t_flac_decoder_task = NULL;
+    //    }
 
     if (dec_task_handle != NULL) {
       vTaskDelete(dec_task_handle);
@@ -1000,15 +1188,6 @@ static void http_get_task(void *pvParameters) {
     uint32_t internalState = 0;
 
     firstNetBuf = NULL;
-
-#define TEST_DECODER_TASK 1
-
-    decoderWriteSemaphore = xSemaphoreCreateMutex();
-    xSemaphoreTake(decoderWriteSemaphore, portMAX_DELAY);
-
-    decoderReadSemaphore = xSemaphoreCreateMutex();
-    xSemaphoreGive(decoderReadSemaphore);  // only decoder read callback/task
-                                           // can give semaphore
 
     while (1) {
       rc2 = netconn_recv(lwipNetconn, &firstNetBuf);
@@ -1374,11 +1553,21 @@ static void http_get_task(void *pvParameters) {
 
                       internalState++;
 
-                      //                      ESP_LOGI(TAG,
-                      //                      "chunk with size: %d, at time"
-                      //                      " %d.%d", wire_chnk.size,
-                      //                      wire_chnk.timestamp.sec,
-                      //                      wire_chnk.timestamp.usec);
+                      decoderChunk.bytes = wire_chnk.size;
+                      while (!decoderChunk.inData) {
+                        decoderChunk.inData =
+                            (uint8_t *)malloc(decoderChunk.bytes);
+                        if (!decoderChunk.inData) {
+                          vTaskDelay(pdMS_TO_TICKS(1));
+                        }
+                      }
+
+                      payloadOffset = 0;
+
+                      // ESP_LOGI(TAG, "chunk with size: %u, at time %ld.%ld",
+                      // wire_chnk.size,
+                      //                       wire_chnk.timestamp.sec,
+                      //                       wire_chnk.timestamp.usec);
 
                       break;
                     }
@@ -1460,81 +1649,11 @@ static void http_get_task(void *pvParameters) {
                           }
 
                           case FLAC: {
-#if TEST_DECODER_TASK
-                            pDecData = NULL;
-                            while (!pDecData) {
-                              pDecData = (decoderData_t *)malloc(
-                                  sizeof(decoderData_t));
-                              if (!pDecData) {
-                                vTaskDelay(pdMS_TO_TICKS(1));
-                              }
-                            }
-
-                            pDecData->bytes = tmp_size;
-
-                            // store timestamp for
-                            // later use
-                            pDecData->timestamp = wire_chnk.timestamp;
-                            pDecData->inData = NULL;
-
-                            // while ((!pFlacData->inData) && (mallocCnt < 100))
-                            // {
-                            while (!pDecData->inData) {
-                              pDecData->inData =
-                                  (uint8_t *)malloc(pDecData->bytes);
-                              if (!pDecData->inData) {
-                                vTaskDelay(pdMS_TO_TICKS(1));
-                              }
-                            }
-
-                            if (pDecData->inData) {
-                              memcpy(pDecData->inData, start, tmp_size);
-                              pDecData->outData = NULL;
-                              pDecData->type = SNAPCAST_MESSAGE_WIRE_CHUNK;
-
-                              // send data to separate task which will handle
-                              // this
-                              xQueueSend(decoderTaskQHdl, &pDecData,
-                                         portMAX_DELAY);
-                            }
-#else
-                            flacData.bytes = tmp_size;
-                            flacData.timestamp =
-                                wire_chnk.timestamp;  // store timestamp for
-                                                      // later use
-                            flacData.inData = start;
-                            pDecData = &flacData;
-
-                            startTime = esp_timer_get_time();
-
-                            xSemaphoreTake(decoderReadSemaphore, portMAX_DELAY);
-
-                            // send data to flac decoder
-                            xQueueSend(decoderReadQHdl, &pDecData,
-                                       portMAX_DELAY);
-                            // and wait until data was
-                            // processed
-                            xSemaphoreTake(decoderReadSemaphore, portMAX_DELAY);
-                            // need to release mutex
-                            // afterwards for next round
-                            xSemaphoreGive(decoderReadSemaphore);
-
-#if 0  // enable heap memory analyzing
-                            {
-                              static uint32_t cnt = 0;
-                              if (++cnt % 8 == 0) {
-                                ESP_LOGI(
-                                    TAG, "8bit %d, block %d, 32 bit %d, block %d, waiting %d",
-                                    heap_caps_get_free_size(MALLOC_CAP_8BIT),
-                                    heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
-                                    heap_caps_get_free_size(MALLOC_CAP_32BIT |
-                                    MALLOC_CAP_EXEC),
-                                    heap_caps_get_largest_free_block(MALLOC_CAP_32BIT
-                                    | MALLOC_CAP_EXEC), pcm_chunk_queue_msg_waiting());
-                              }
-                            }
-#endif
-#endif
+                            memcpy(&decoderChunk.inData[payloadOffset], start,
+                                   tmp_size);
+                            payloadOffset += tmp_size;
+                            decoderChunk.outData = NULL;
+                            decoderChunk.type = SNAPCAST_MESSAGE_WIRE_CHUNK;
 
                             break;
                           }
@@ -1624,69 +1743,107 @@ static void http_get_task(void *pvParameters) {
                             }
 
                             case FLAC: {
-#if TEST_DECODER_TASK
-                              pDecData = NULL;  // send NULL so we know to wait
-                                                // for decoded data in task
-
-                              // ESP_LOGE(TAG, "%s: flacTaskQHdl start
-                              // wireChnk", __func__);
-                              xQueueSend(decoderTaskQHdl, &pDecData,
-                                         portMAX_DELAY);
-                              // ESP_LOGE(TAG, "%s: flacTaskQHdl stop wireChnk",
-                              // __func__);
-#else
-                              xSemaphoreGive(decoderWriteSemaphore);
-                              // and wait until it is done
-                              xQueueReceive(decoderWriteQHdl, &pDecData,
-                                            portMAX_DELAY);
-
-                              if (pDecData->outData != NULL) {
-                                pcmData = pDecData->outData;
-                                pcmData->timestamp = wire_chnk.timestamp;
-
-                                size_t decodedSize =
-                                    pcmData->totalSize;  // pFlacData->bytes;
-
-                                //                                ESP_LOGE(TAG,
-                                //                                "decoded size:
-                                //                                %d",
-                                //                                decodedSize);
-
-                                scSet.chkInFrames =
-                                    decodedSize / ((size_t)scSet.ch *
-                                                   (size_t)(scSet.bits / 8));
-                                if (player_send_snapcast_setting(&scSet) !=
-                                    pdPASS) {
-                                  ESP_LOGE(TAG,
-                                           "Failed to "
-                                           "notify "
-                                           "sync task "
-                                           "about "
-                                           "codec. Did you "
-                                           "init player?");
+                              while (decoderChunk.bytes > 0) {
+                                if (FLAC__stream_decoder_process_single(
+                                        flacDecoder) == 0) {
+                                  ESP_LOGE(
+                                      TAG,
+                                      "%s: FLAC__stream_decoder_process_single "
+                                      "failed",
+                                      __func__);
 
                                   return;
                                 }
+                              }
 
-                                endTime = esp_timer_get_time();
+                              pcm_chunk_message_t *new_pcmChunk;
+                              int32_t ret = allocate_pcm_chunk_memory(
+                                  &new_pcmChunk, pcmChunk.bytes);
+
+                              //								ESP_LOGE
+                              //(TAG, "block size: %ld", pcmChunk.bytes /
+                              //(scSet.ch * (scSet.bits/8)));
+
+                              //   ESP_LOGI (TAG, "mem %p %p %d",
+                              //   flacData->outData,
+                              //   flacData->outData->fragment->payload,
+                              //   flacData->bytes);
+
+                              if (ret == 0) {
+                                pcm_chunk_fragment_t *fragment =
+                                    new_pcmChunk->fragment;
+                                uint32_t fragmentCnt = 0;
+
+                                if (fragment->payload != NULL) {
+                                  for (int i = 0;
+                                       i < pcmChunk.bytes /
+                                               (scSet.ch * (scSet.bits / 8));
+                                       i++) {
+                                    // TODO: for now fragmented payload is not
+                                    // supported and the whole chunk is expected
+                                    // to be in the first fragment
+                                    uint32_t tmpData;
+                                    memcpy(&tmpData,
+                                           &pcmChunk.outData[fragmentCnt],
+                                           (scSet.ch * (scSet.bits / 8)));
+                                    //										tmpData
+                                    //=
+                                    //((uint32_t)((buffer[0][i] >> 8) & 0xFF) <<
+                                    // 24) |
+                                    //												  ((uint32_t)((buffer[0][i]
+                                    //>> 0) & 0xFF) << 16) |
+                                    //												  ((uint32_t)((buffer[1][i]
+                                    //>> 8) & 0xFF) << 8) |
+                                    //												  ((uint32_t)((buffer[1][i]
+                                    //>> 0) & 0xFF) << 0);
+
+                                    if (fragment != NULL) {
+                                      volatile uint32_t *test =
+                                          (volatile uint32_t *)(&(
+                                              fragment->payload[fragmentCnt]));
+                                      *test = (volatile uint32_t)tmpData;
+                                    }
+
+                                    fragmentCnt +=
+                                        (scSet.ch * (scSet.bits / 8));
+                                    if (fragmentCnt >= fragment->size) {
+                                      fragmentCnt = 0;
+
+                                      fragment = fragment->nextFragment;
+                                    }
+                                  }
+                                }
+
+                                new_pcmChunk->timestamp = wire_chnk.timestamp;
 
 #if CONFIG_USE_DSP_PROCESSOR
-                                if ((pcmData) && (pcmData->fragment->payload)) {
+                                if (new_pcmChunk.fragment->payload) {
                                   dsp_processor_worker(
-                                      pcmData->fragment->payload,
-                                      pcmData->fragment->size, scSet.sr);
+                                      new_pcmChunk.fragment->payload,
+                                      new_pcmChunk.fragment->size, scSet.sr);
                                 }
 
 #endif
 
-                                insert_pcm_chunk(pcmData);
-
-                                // ESP_LOGE(TAG, "duration = %lld", endTime -
-                                // startTime);
-
-                                pcmData = NULL;
+                                insert_pcm_chunk(new_pcmChunk);
                               }
-#endif
+
+                              free(pcmChunk.outData);
+                              pcmChunk.outData = NULL;
+                              pcmChunk.bytes = 0;
+
+                              if (player_send_snapcast_setting(&scSet) !=
+                                  pdPASS) {
+                                ESP_LOGE(TAG,
+                                         "Failed to "
+                                         "notify "
+                                         "sync task "
+                                         "about "
+                                         "codec. Did you "
+                                         "init player?");
+
+                                return;
+                              }
 
                               break;
                             }
@@ -1694,11 +1851,9 @@ static void http_get_task(void *pvParameters) {
                             case PCM: {
                               size_t decodedSize = wire_chnk.size;
 
-                              //                              ESP_LOGW(TAG, "got
-                              //                              PCM chunk,
-                              //                              typedMsgCurrentPos
-                              //                              %d",
-                              //                              typedMsgCurrentPos);
+                              // ESP_LOGW(TAG, "got PCM chunk,"
+                              //               "typedMsgCurrentPos %d",
+                              //               typedMsgCurrentPos);
 
                               if (pcmData) {
                                 pcmData->timestamp = wire_chnk.timestamp;
@@ -1707,6 +1862,10 @@ static void http_get_task(void *pvParameters) {
                               scSet.chkInFrames =
                                   decodedSize /
                                   ((size_t)scSet.ch * (size_t)(scSet.bits / 8));
+
+                              ESP_LOGW(TAG,
+                                       "got PCM decoded chunk size: %ld frames",
+                                       scSet.chkInFrames);
 
                               if (player_send_snapcast_setting(&scSet) !=
                                   pdPASS) {
@@ -1982,35 +2141,11 @@ static void http_get_task(void *pvParameters) {
                         // first ensure everything is set up
                         // correctly and resources are
                         // available
-                        if (t_flac_decoder_task != NULL) {
-                          vTaskDelete(t_flac_decoder_task);
-                          t_flac_decoder_task = NULL;
-                        }
-
-                        if (dec_task_handle != NULL) {
-                          vTaskDelete(dec_task_handle);
-                          dec_task_handle = NULL;
-                        }
 
                         if (flacDecoder != NULL) {
                           FLAC__stream_decoder_finish(flacDecoder);
                           FLAC__stream_decoder_delete(flacDecoder);
                           flacDecoder = NULL;
-                        }
-
-                        if (decoderWriteQHdl != NULL) {
-                          vQueueDelete(decoderWriteQHdl);
-                          decoderWriteQHdl = NULL;
-                        }
-
-                        if (decoderReadQHdl != NULL) {
-                          vQueueDelete(decoderReadQHdl);
-                          decoderReadQHdl = NULL;
-                        }
-
-                        if (decoderTaskQHdl != NULL) {
-                          vQueueDelete(decoderTaskQHdl);
-                          decoderTaskQHdl = NULL;
                         }
 
                         if (opusDecoder != NULL) {
@@ -2019,15 +2154,8 @@ static void http_get_task(void *pvParameters) {
                         }
 
                         if (codec == OPUS) {
-                          decoderTaskQHdl =
-                              xQueueCreate(8, sizeof(decoderData_t *));
-                          if (decoderTaskQHdl == NULL) {
-                            ESP_LOGE(TAG, "Failed to create decoderTaskQHdl");
-                            return;
-                          }
-
-                          //                          ESP_LOGI(TAG, "OPUS not
-                          //                          implemented yet"); return;
+                          // ESP_LOGI(TAG, "OPUS not
+                          // mplemented yet"); return;
                           uint16_t channels;
                           uint32_t rate;
                           uint16_t bits;
@@ -2062,103 +2190,38 @@ static void http_get_task(void *pvParameters) {
                                 OPUS_TASK_CORE_ID);
                           }
                         } else if (codec == FLAC) {
-                          decoderTaskQHdl =
-                              xQueueCreate(8, sizeof(decoderData_t *));
-                          if (decoderTaskQHdl == NULL) {
-                            ESP_LOGE(TAG, "Failed to create decoderTaskQHdl");
+                          decoderChunk.bytes = typedMsgLen;
+                          decoderChunk.inData =
+                              (uint8_t *)malloc(decoderChunk.bytes);
+                          memcpy(decoderChunk.inData, p_tmp, typedMsgLen);
+                          decoderChunk.outData = NULL;
+                          decoderChunk.type = SNAPCAST_MESSAGE_CODEC_HEADER;
+
+                          flacDecoder = FLAC__stream_decoder_new();
+                          if (flacDecoder == NULL) {
+                            ESP_LOGE(TAG, "Failed to init flac decoder");
                             return;
                           }
 
-                          decoderReadQHdl =
-                              xQueueCreate(1, sizeof(decoderData_t *));
-                          if (decoderReadQHdl == NULL) {
-                            ESP_LOGE(TAG, "Failed to create flac read queue");
+                          FLAC__StreamDecoderInitStatus init_status =
+                              FLAC__stream_decoder_init_stream(
+                                  flacDecoder, read_callback, NULL, NULL, NULL,
+                                  NULL, write_callback, metadata_callback,
+                                  error_callback, &scSet);
+                          if (init_status !=
+                              FLAC__STREAM_DECODER_INIT_STATUS_OK) {
+                            ESP_LOGE(TAG, "ERROR: initializing decoder: %s\n",
+                                     FLAC__StreamDecoderInitStatusString
+                                         [init_status]);
+
                             return;
                           }
 
-                          decoderWriteQHdl =
-                              xQueueCreate(1, sizeof(decoderData_t *));
-                          if (decoderWriteQHdl == NULL) {
-                            ESP_LOGE(TAG, "Failed to create flac write queue");
-                            return;
-                          }
+                          FLAC__stream_decoder_process_until_end_of_metadata(
+                              flacDecoder);
 
-                          if (t_flac_decoder_task == NULL) {
-                            xTaskCreatePinnedToCore(
-                                &flac_decoder_task, "flac_decoder_task",
-                                9 * 256, &scSet, FLAC_DECODER_TASK_PRIORITY,
-                                &t_flac_decoder_task,
-                                FLAC_DECODER_TASK_CORE_ID);
-                          }
-
-#if TEST_DECODER_TASK
-                          if (dec_task_handle == NULL) {
-                            xTaskCreatePinnedToCore(
-                                &flac_task, "flac_task", 9 * 256, &scSet,
-                                FLAC_TASK_PRIORITY, &dec_task_handle,
-                                FLAC_TASK_CORE_ID);
-                          }
-
-                          pDecData =
-                              (decoderData_t *)malloc(sizeof(decoderData_t));
-                          memset(pDecData, 0, sizeof(decoderData_t));
-
-                          pDecData->bytes = typedMsgLen;
-                          pDecData->inData = (uint8_t *)malloc(typedMsgLen);
-                          memcpy(pDecData->inData, p_tmp, typedMsgLen);
-                          pDecData->outData = NULL;
-                          pDecData->type = SNAPCAST_MESSAGE_CODEC_HEADER;
-
-                          // ESP_LOGE(TAG, "%s: flacTaskQHdl start codec
-                          // header", __func__);
-
-                          // send codec header to flac decoder
-                          xQueueSend(decoderTaskQHdl, &pDecData, portMAX_DELAY);
-
-                          // ESP_LOGE(TAG, "sent codec header");
-
-                          // send NULL so we know to wait
-                          // for decoded data in task
-                          pDecData = NULL;
-                          xQueueSend(decoderTaskQHdl, &pDecData, portMAX_DELAY);
-
-                          // ESP_LOGE(TAG, "%s: flacTaskQHdl done codec header",
+                          // ESP_LOGI(TAG, "%s: processed codec header",
                           // __func__);
-
-#else
-
-                          if (flacData.outData != NULL) {
-                            free(flacData.outData);
-                            flacData.outData = NULL;
-                          }
-
-                          flacData.bytes = typedMsgLen;
-                          flacData.inData = p_tmp;
-                          pDecData = &flacData;
-
-                          // TODO: find a smarter way for
-                          // this wait for task creation done
-                          while (decoderReadQHdl == NULL) {
-                            vTaskDelay(10);
-                          }
-
-                          xSemaphoreTake(decoderReadSemaphore, portMAX_DELAY);
-
-                          // send data to flac decoder
-                          xQueueSend(decoderReadQHdl, &pDecData, portMAX_DELAY);
-                          // and wait until data was
-                          // processed
-                          xSemaphoreTake(decoderReadSemaphore, portMAX_DELAY);
-                          // need to release mutex afterwards
-                          // for next round
-                          xSemaphoreGive(decoderReadSemaphore);
-                          // wait until it is done
-                          xQueueReceive(decoderWriteQHdl, &pDecData,
-                                        portMAX_DELAY);
-
-                          ESP_LOGI(TAG, "fLaC sampleformat: %d:%d:%d", scSet.sr,
-                                   scSet.bits, scSet.ch);
-#endif
                         } else if (codec == PCM) {
                           uint16_t channels;
                           uint32_t rate;
