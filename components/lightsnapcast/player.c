@@ -230,8 +230,6 @@ static esp_err_t player_setup_i2s(i2s_port_t i2sNum,
     my_i2s_channel_disable(tx_chan);
     i2s_del_channel(tx_chan);
     tx_chan = NULL;
-
-    //	  periph_rtc_apll_release();
   }
 
   i2s_chan_config_t tx_chan_cfg = {
@@ -257,9 +255,7 @@ static esp_err_t player_setup_i2s(i2s_port_t i2sNum,
                                                       I2S_SLOT_MODE_STEREO),
       .gpio_cfg =
           {
-              .mclk = pin_config0
-                          .mck_io_num,  // some codecs may require mclk signal,
-                                        // this example doesn't need it
+              .mclk = pin_config0.mck_io_num,
               .bclk = pin_config0.bck_io_num,
               .ws = pin_config0.ws_io_num,
               .dout = pin_config0.data_out_num,
@@ -1186,6 +1182,7 @@ static void player_task(void *pvParameters) {
   int64_t clientDacLatency_us = 0;
   int64_t diff2Server;
   int64_t outputBufferDacTime = 0;
+  static int64_t lastChunkStart = 0;
 
   memset(&scSet, 0, sizeof(snapcastSetting_t));
 
@@ -1218,14 +1215,16 @@ static void player_task(void *pvParameters) {
         buf_us = (int64_t)(__scSet.buf_ms) * 1000LL;
 
         chkDur_us =
-            (int64_t)__scSet.chkInFrames * (int64_t)1E6 / (int64_t)__scSet.sr;
+            (int64_t)__scSet.chkInFrames * 1000000LL / (int64_t)__scSet.sr;
 
         // this value is highly coupled with I2S DMA buffer
         // size. DMA buffer has a size of 1 chunk (e.g. 20ms)
         // so next chunk we get from queue will be -20ms
         outputBufferDacTime = chkDur_us * CHNK_CTRL_CNT;
 
-        clientDacLatency_us = (int64_t)__scSet.cDacLat_ms * 1000;
+        clientDacLatency_us = (int64_t)__scSet.cDacLat_ms * 1000LL;
+
+        // ESP_LOGE(TAG, "### outputBufferDacTime: %lld", outputBufferDacTime);
 
         if ((scSet.sr != __scSet.sr) || (scSet.bits != __scSet.bits) ||
             (scSet.ch != __scSet.ch)) {
@@ -1313,7 +1312,14 @@ static void player_task(void *pvParameters) {
       }
 
       if (ret != pdFAIL) {
-        // ESP_LOGW(TAG, "got pcm chunk");
+        // chkDur_us = (int64_t)scSet.chkInFrames * (int64_t)1E6 /
+        // (int64_t)scSet.sr;
+        //    	  chkDur_us = (int64_t)(chnk->fragment->size / (scSet.bits / 8)
+        //    / scSet.ch) * (int64_t)1000000LL / (int64_t)scSet.sr;
+        //    	  outputBufferDacTime = chkDur_us * CHNK_CTRL_CNT;
+
+        //         ESP_LOGI(TAG, "got pcm chunk with size %d",
+        //         chnk->fragment->size);
       }
     } else {
       // ESP_LOGW(TAG, "already retrieved chunk needs service");
@@ -1326,7 +1332,7 @@ static void player_task(void *pvParameters) {
                              (int64_t)chnk->timestamp.usec;
 
         age = serverNow - chunkStart - buf_us + clientDacLatency_us;
-#if USE_BIG_DMA_BUFFER
+#if USE_BIG_DMA_BUFFER && USE_SAMPLE_INSERTION
         savedAge = age;
         if (insertedSamplesCounter > 0) {
           age -= (((1 + insertedSamplesCounter / i2sDmaBufMaxLen) * chkDur_us /
@@ -1339,13 +1345,30 @@ static void player_task(void *pvParameters) {
         }
 #endif
 
-        // ESP_LOGE(TAG,"age: %lld, serverNow %lld, chunkStart %lld,
-        //        buf_us %lld", age, serverNow, chunkStart, buf_us);
+        // ESP_LOGE(TAG, "next chunk scheduled in %lld, (%lld, %lld), age %lld",
+        // chunkStart - lastChunkStart, chunkStart, lastChunkStart, age);
+        //                ESP_LOGE(TAG, "%lld, %d", chunkStart,
+        //                chnk->fragment->size);
+
+        lastChunkStart = chunkStart;
+
+        //         ESP_LOGE(TAG, "age: %lld, serverNow %lld, chunkStart %lld, "
+        //        		 	   "buf_us %lld", age, serverNow,
+        //        chunkStart, buf_us);
 
         if (initialSync == 1) {
           // on initialSync == 0 (hard sync) we don't have any data in i2s DMA
           // buffer so in that case we don't need to add this
           age += outputBufferDacTime;
+
+          if (chnk->fragment->size > (size_t)4608UL) {
+            //        	  age += chkDur_us;
+            // ESP_LOGE(TAG, "age 1 %lld", age);
+          } else {
+            // ESP_LOGE(TAG, "age 2 %lld", age);
+          }
+
+          //          ESP_LOGE(TAG, "age %lld", age);
         }
       } else {
         // ESP_LOGW(TAG, "couldn't get server now");
@@ -1362,6 +1385,8 @@ static void player_task(void *pvParameters) {
 
       if (age < 0) {  // get initial sync using hardware timer
         if (initialSync == 0) {
+          bool dmaFull = false;
+
           MEDIANFILTER_Init(&shortMedianFilter);
           MEDIANFILTER_Init(&miniMedianFilter);
 
@@ -1377,6 +1402,26 @@ static void player_task(void *pvParameters) {
             if (chnk == NULL) {
               if (pcmChkQHdl != NULL) {
                 ret = xQueueReceive(pcmChkQHdl, &chnk, portMAX_DELAY);
+                if (ret != pdFAIL) {
+                  ESP_LOGI(TAG, "got pcm chunk with size %d",
+                           chnk->fragment->size);
+
+                  int64_t chunkStart =
+                      (int64_t)chnk->timestamp.sec * 1000000LL +
+                      (int64_t)chnk->timestamp.usec;
+
+                  server_now(&serverNow, &diff2Server);
+                  int64_t tmpAge =
+                      serverNow - chunkStart - buf_us + clientDacLatency_us;
+
+                  // ESP_LOGE(TAG, "next chunk scheduled in %lld, (%lld, %lld),
+                  // age %lld", chunkStart - lastChunkStart, chunkStart,
+                  // lastChunkStart, tmpAge);
+                  //                    ESP_LOGE(TAG, "chunk scheduled in %lld",
+                  //                    tmpAge);
+
+                  lastChunkStart = chunkStart;
+                }
               }
             }
 
@@ -1386,9 +1431,13 @@ static void player_task(void *pvParameters) {
 
             ESP_ERROR_CHECK(
                 i2s_channel_preload_data(tx_chan, p_payload, size, &written));
-            // ESP_LOGE(TAG, "preload %d bytes", written);
+            ESP_LOGE(TAG, "preload %d bytes", written);
 
-            // TODO: do error check if DMA is full here
+            // check if DMA is full at first try here
+            if (fragment->size >= (CHNK_CTRL_CNT * scSet.chkInFrames *
+                                   (scSet.bits / 8) * scSet.ch)) {
+              dmaFull = true;
+            }
 
             size -= written;
             p_payload += written;
@@ -1401,7 +1450,13 @@ static void player_task(void *pvParameters) {
               } else {
                 free_pcm_chunk(chnk);
                 chnk = NULL;
+
+                ESP_LOGE(TAG, "free");
               }
+            }
+
+            if (dmaFull == true) {
+              break;
             }
 
             tmpCnt--;
@@ -1434,7 +1489,9 @@ static void player_task(void *pvParameters) {
           ESP_LOGI(TAG, "initial sync age: %lldus, chunk duration: %lldus", age,
                    chkDur_us);
 
-          continue;
+          if (size == 0) {
+            continue;
+          }
         }
       } else if ((age > 0) && (initialSync == 0)) {
         if (chnk != NULL) {
@@ -1497,9 +1554,10 @@ static void player_task(void *pvParameters) {
         int msgWaiting = uxQueueMessagesWaiting(pcmChkQHdl);
 
         // resync hard if we are getting very late / early.
-        // rest gets tuned in through apll speed control
+        // rest gets tuned in through apll speed control or sample insertion
         if ((msgWaiting == 0) || (MEDIANFILTER_isFull(&shortMedianFilter, 0) &&
-                                  (abs(shortMedian) > hardResyncThreshold))) {
+                                  ((shortMedian > hardResyncThreshold) ||
+                                   (shortMedian < -hardResyncThreshold)))) {
           if (chnk != NULL) {
             free_pcm_chunk(chnk);
             chnk = NULL;
@@ -1570,11 +1628,11 @@ static void player_task(void *pvParameters) {
           msec = usec / 1000;
           usec = usec % 1000;
 
-          ESP_LOGI(TAG, "%d, %lldus, q %d", dir, avg,
-                   uxQueueMessagesWaiting(pcmChkQHdl));
+          //          ESP_LOGI(TAG, "%d, %lldus, q %d", dir, avg,
+          //                   uxQueueMessagesWaiting(pcmChkQHdl));
 
-          //		   ESP_LOGI (TAG, "%d, %lldus, %lldus %llds,
-          //%lld.%lldms", dir, age, avg, sec, msec, usec);
+          ESP_LOGI(TAG, "%d, %lldus, %lldus %llds, %lld.%lldms", dir, age, avg,
+                   sec, msec, usec);
 
           // ESP_LOGI(TAG, "%d, %lldus, %lldus, %lldus, q:%d", dir, avg,
           //          shortMedian, miniMedian,
@@ -1592,9 +1650,13 @@ static void player_task(void *pvParameters) {
 
         dir = 0;
 
-        fragment = chnk->fragment;
-        p_payload = fragment->payload;
-        size = fragment->size;
+        if (size == 0) {
+          fragment = chnk->fragment;
+          p_payload = fragment->payload;
+          size = fragment->size;
+        } else {
+          //        	ESP_LOGI(TAG, "remaining");
+        }
 
         if (p_payload != NULL) {
           do {
@@ -1619,11 +1681,14 @@ static void player_task(void *pvParameters) {
             if (i2s_channel_write(tx_chan, p_payload, size, &written,
                                   portMAX_DELAY) != ESP_OK) {
               ESP_LOGE(TAG, "i2s_playback_task: I2S write error %d", size);
+            } else {
+              //            	ESP_LOGI(TAG, "wrote %d", written);
             }
 
             if (written < size) {
               ESP_LOGE(TAG, "i2s_playback_task: I2S didn't write all data");
             }
+
             size -= written;
             p_payload += written;
 
@@ -1638,6 +1703,7 @@ static void player_task(void *pvParameters) {
                 free_pcm_chunk(chnk);
                 chnk = NULL;
                 dir = 0;
+
                 break;
               }
             }

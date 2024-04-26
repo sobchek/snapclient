@@ -82,8 +82,8 @@ SemaphoreHandle_t decoderWriteSemaphore = NULL;
 
 const char *VERSION_STRING = "0.0.2";
 
-#define HTTP_TASK_PRIORITY (configMAX_PRIORITIES - 2)  // 9
-#define HTTP_TASK_CORE_ID 1                            // 1  // tskNO_AFFINITY
+#define HTTP_TASK_PRIORITY 9
+#define HTTP_TASK_CORE_ID tskNO_AFFINITY  // 1  // tskNO_AFFINITY
 
 #define OTA_TASK_PRIORITY 6
 #define OTA_TASK_CORE_ID tskNO_AFFINITY
@@ -1760,14 +1760,15 @@ static void http_get_task(void *pvParameters) {
                               int32_t ret = allocate_pcm_chunk_memory(
                                   &new_pcmChunk, pcmChunk.bytes);
 
-                              //								ESP_LOGE
-                              //(TAG, "block size: %ld", pcmChunk.bytes /
-                              //(scSet.ch * (scSet.bits/8)));
+                              scSet.chkInFrames =
+                                  FLAC__stream_decoder_get_blocksize(
+                                      flacDecoder);
 
-                              //   ESP_LOGI (TAG, "mem %p %p %d",
-                              //   flacData->outData,
-                              //   flacData->outData->fragment->payload,
-                              //   flacData->bytes);
+                              // ESP_LOGE (TAG, "block size: %ld",
+                              // scSet.chkInFrames * scSet.bits / 8 * scSet.ch);
+                              //							  ESP_LOGI
+                              //(TAG, "new_pcmChunk with size %ld",
+                              // new_pcmChunk->totalSize);
 
                               if (ret == 0) {
                                 pcm_chunk_fragment_t *fragment =
@@ -1775,10 +1776,11 @@ static void http_get_task(void *pvParameters) {
                                 uint32_t fragmentCnt = 0;
 
                                 if (fragment->payload != NULL) {
-                                  for (int i = 0;
-                                       i < pcmChunk.bytes /
-                                               (scSet.ch * (scSet.bits / 8));
-                                       i++) {
+                                  uint32_t frames =
+                                      pcmChunk.bytes /
+                                      (scSet.ch * (scSet.bits / 8));
+
+                                  for (int i = 0; i < frames; i++) {
                                     // TODO: for now fragmented payload is not
                                     // supported and the whole chunk is expected
                                     // to be in the first fragment
@@ -1814,7 +1816,38 @@ static void http_get_task(void *pvParameters) {
                                   }
                                 }
 
+                                //                                static
+                                //                                uint64_t
+                                //                                oldTimestamp =
+                                //                                0;
+                                //
+                                //                                ESP_LOGW(TAG,
+                                //                                "time step
+                                //                                %lld",
+                                //                                (uint64_t)wire_chnk.timestamp.sec
+                                //                                * 1000000UL +
+                                //                                								(uint64_t)wire_chnk.timestamp.usec
+                                //                                -
+                                //																oldTimestamp);
+
                                 new_pcmChunk->timestamp = wire_chnk.timestamp;
+
+                                //                                int64_t
+                                //                                chunkStart =
+                                //                                (int64_t)new_pcmChunk->timestamp.sec
+                                //                                * 1000000LL +
+                                //                                                     (int64_t)new_pcmChunk->timestamp.usec;
+                                //                                ESP_LOGE(TAG,
+                                //                                "%lld, %d",
+                                //                                chunkStart,
+                                //                                new_pcmChunk->fragment->size);
+
+                                //                                 oldTimestamp
+                                //                                 =
+                                //                                 (uint64_t)wire_chnk.timestamp.sec
+                                //                                 * 1000000ULL
+                                //                                 +
+                                //                                 (uint64_t)wire_chnk.timestamp.usec;
 
 #if CONFIG_USE_DSP_PROCESSOR
                                 if (new_pcmChunk.fragment->payload) {
@@ -2127,7 +2160,7 @@ static void http_get_task(void *pvParameters) {
                         currentPos += typedMsgLen;
                         len -= typedMsgLen;
                       } else {
-                        memcpy(&p_tmp[offset], start, typedMsgLen);
+                        memcpy(&p_tmp[offset], start, len);
 
                         offset += len;
 
@@ -2247,8 +2280,10 @@ static void http_get_task(void *pvParameters) {
                           return;
                         }
 
-                        free(p_tmp);
-                        p_tmp = NULL;
+                        if (p_tmp) {
+                          free(p_tmp);
+                          p_tmp = NULL;
+                        }
 
                         // ESP_LOGI(TAG, "done codec header msg");
 

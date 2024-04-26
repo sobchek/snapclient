@@ -35,7 +35,7 @@ struct pcm_chunk_fragment {
 
 typedef struct pcmData {
   tv_t timestamp;
-  uint32_t totalSize;
+  size_t totalSize;
   pcm_chunk_fragment_t *fragment;
 } pcm_chunk_message_t;
 
