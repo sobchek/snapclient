@@ -275,14 +275,17 @@ static esp_err_t player_setup_i2s(i2s_port_t i2sNum,
                   {
 #if CONFIG_INVERT_MCLK_LEVEL
                       .mclk_inv = true,
+
 #else
                       .mclk_inv = false,
 #endif
+                
 #if CONFIG_INVERT_BCLK_LEVEL
                       .bclk_inv = true,
 #else
                       .bclk_inv = false,
 #endif
+                
 #if CONFIG_INVERT_WORD_SELECT_LEVEL
                       .ws_inv = true,
 #else
