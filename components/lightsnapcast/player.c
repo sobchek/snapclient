@@ -1588,8 +1588,8 @@ static void player_task(void *pvParameters) {
           msec = usec / 1000;
           usec = usec % 1000;
 
-          //          ESP_LOGI(TAG, "%d, %lldus, q %d", dir, avg,
-          //                   uxQueueMessagesWaiting(pcmChkQHdl));
+          // ESP_LOGI(TAG, "%d, %lldus, q %d", dir, avg,
+          //                uxQueueMessagesWaiting(pcmChkQHdl));
 
           // ESP_LOGI(TAG, "%d, %lldus, %lldus %llds, %lld.%lldms", dir, age,
           // avg,
