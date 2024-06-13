@@ -101,11 +101,10 @@ menu "Audio Board"
 
 	    config DAC_TAS5805M
 	        bool "Texas Instruments TAS5805M"
-
-		config DAC_PT8211
-			bool "Princeton Technology PT8211"
-			select I2S_USE_MSB_FORMAT
-
+          
+		  config DAC_PT8211
+			  bool "Princeton Technology PT8211"
+			  select I2S_USE_MSB_FORMAT
 	    endchoice
 
 	    menu "DAC I2C control interface"
