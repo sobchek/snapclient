@@ -123,7 +123,7 @@ git submodule update --init
 
 <a name="config"></a>
 ### Snapcast ESP Configuration
-Configure your platform:
+Frist copy one of the template sdkconfig files and rename it to `sdkconfig` then configure your platform:
 ```
 idf.py menuconfig
 ```
