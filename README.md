@@ -126,7 +126,7 @@ git submodule update --init
 Frist copy one of the template sdkconfig files and rename it to sdkconfig
 
 ```
-cp sdkconfig_Lyrat sdkconfig
+cp sdkconfig_lyrat_v4.3 sdkconfig
 ```
 
 then configure your platform:
