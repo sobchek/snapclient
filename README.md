@@ -119,7 +119,18 @@ git submodule update --init
 
 ### ESP-IDF environnement configuration
 - <b>If you're on Windows :</b> Install [ESP-IDF v5.1.1](https://github.com/espressif/esp-idf/releases/tag/v5.1.1) locally ([More info](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/get-started/windows-setup-update.html)).
-- <b>If you're on Linux :</b> Use the docker image for ESP-IDF by following [docker build](doc/docker_build.md) doc.
+- <b>If you're on Linux (docker) :</b> Use the image for ESP-IDF by following [docker build](doc/docker_build.md) doc
+- <b>If you're on Linux :</b> follow [official Espressif](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/get-started/linux-macos-setup.html) instructions
+  For debian based systems you'll need to do the following:
+  ```
+  sudo apt-get install git wget flex bison gperf python3 python3-pip python3-venv cmake ninja-build ccache libffi-dev libssl-dev dfu-util libusb-1.0-0
+  mkdir -p ~/esp
+  cd ~/esp
+  git clone -b v5.1.1 --recursive https://github.com/espressif/esp-idf.git
+  cd ~/esp/esp-idf
+  ./install.sh esp32
+  . ./export.sh
+  ```
 
 <a name="config"></a>
 ### Snapcast ESP Configuration
