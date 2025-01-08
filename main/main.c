@@ -58,6 +58,9 @@
 #include "snapcast.h"
 #include "ui_http_server.h"
 
+static bool isCachedChunk = false;
+static uint32_t cachedBlocks = 0;
+
 static FLAC__StreamDecoderReadStatus read_callback(
     const FLAC__StreamDecoder *decoder, FLAC__byte buffer[], size_t *bytes,
     void *client_data);
@@ -306,6 +309,8 @@ static FLAC__StreamDecoderReadStatus read_callback(
       return FLAC__STREAM_DECODER_READ_STATUS_END_OF_STREAM;
     }
 
+    isCachedChunk = false;
+
     //	  if (flacData->inData == NULL) {
     //	    free_flac_data(flacData);
     //
@@ -316,7 +321,7 @@ static FLAC__StreamDecoderReadStatus read_callback(
       memcpy(buffer, decoderChunk.inData, decoderChunk.bytes);
       *bytes = decoderChunk.bytes;
 
-      //	    ESP_LOGW(TAG, "read all flac inData %d", *bytes);
+      // ESP_LOGW(TAG, "read all flac inData %d", *bytes);
 
       free(decoderChunk.inData);
       decoderChunk.inData = NULL;
@@ -330,7 +335,7 @@ static FLAC__StreamDecoderReadStatus read_callback(
       decoderChunk.inData =
           (uint8_t *)realloc(decoderChunk.inData, decoderChunk.bytes);
 
-      ESP_LOGW(TAG, "dind't read all flac inData %d", *bytes);
+      // ESP_LOGW(TAG, "didn't read all flac inData %d", *bytes);
       //	    flacData->inData += *bytes;
       //	    flacData->bytes -= *bytes;
     }
@@ -364,6 +369,10 @@ static FLAC__StreamDecoderWriteStatus write_callback(
                  frame->header.bits_per_sample / 8;
 
   (void)decoder;
+
+  if (isCachedChunk) {
+    cachedBlocks += frame->header.blocksize;
+  }
 
   // xSemaphoreTake(decoderWriteSemaphore, portMAX_DELAY);
 
@@ -1102,7 +1111,7 @@ static void http_get_task(void *pvParameters) {
 
     // init base message
     base_message_rx.type = SNAPCAST_MESSAGE_HELLO;
-    base_message_rx.id = 0x0000;
+    base_message_rx.id = id_counter++;
     base_message_rx.refersTo = 0x0000;
     base_message_rx.sent.sec = now / 1000000;
     base_message_rx.sent.usec = now - base_message_rx.sent.sec * 1000000;
@@ -1371,10 +1380,12 @@ static void http_get_task(void *pvParameters) {
                   //                   base_message_rx.type,
                   //                   base_message_rx.received.sec,
                   //                   base_message_rx.received.usec);
-                  //                  								ESP_LOGI(TAG,"%d
-                  //                  %d.%d", base_message_rx.type,
+                  // ESP_LOGI(TAG,"%d, %d.%d", base_message_rx.type,
                   //                   base_message_rx.received.sec,
                   //                   base_message_rx.received.usec);
+                  // ESP_LOGI(TAG,"%d, %llu", base_message_rx.type,
+                  //		   1000000ULL * base_message_rx.received.sec +
+                  // base_message_rx.received.usec);
 
                   state = TYPED_MESSAGE_STATE;
                   break;
@@ -1564,10 +1575,12 @@ static void http_get_task(void *pvParameters) {
 
                       payloadOffset = 0;
 
-                      // ESP_LOGI(TAG, "chunk with size: %u, at time %ld.%ld",
-                      // wire_chnk.size,
-                      //                       wire_chnk.timestamp.sec,
-                      //                       wire_chnk.timestamp.usec);
+#if 0
+                       ESP_LOGI(TAG, "chunk with size: %u, at time %ld.%ld",
+                    		   	   	   	   	 wire_chnk.size,
+                                             wire_chnk.timestamp.sec,
+                                             wire_chnk.timestamp.usec);
+#endif
 
                       break;
                     }
@@ -1580,19 +1593,6 @@ static void http_get_task(void *pvParameters) {
                       } else {
                         tmp_size = len;
                       }
-
-                      //                      static double lastChunkTimestamp =
-                      //                      0; double timestamp =
-                      //                      ((double)wire_chnk.timestamp.sec *
-                      //                      1000000.0 +
-                      //                      (double)wire_chnk.timestamp.usec)
-                      //                      / 1000.0;
-                      //
-                      //                      ESP_LOGI(TAG, "duration %lfms,
-                      //                      length %d", timestamp -
-                      //                      lastChunkTimestamp, tmp);
-                      //
-                      //                      lastChunkTimestamp = timestamp;
 
                       if (received_header == true) {
                         switch (codec) {
@@ -1743,6 +1743,9 @@ static void http_get_task(void *pvParameters) {
                             }
 
                             case FLAC: {
+                              isCachedChunk = true;
+                              cachedBlocks = 0;
+
                               while (decoderChunk.bytes > 0) {
                                 if (FLAC__stream_decoder_process_single(
                                         flacDecoder) == 0) {
@@ -1754,6 +1757,23 @@ static void http_get_task(void *pvParameters) {
 
                                   return;
                                 }
+                              }
+
+                              // alternating chunk sizes need time stamp repair
+                              if ((cachedBlocks > 0) && (scSet.sr != 0)) {
+                                uint64_t diffUs =
+                                    1000000ULL * cachedBlocks / scSet.sr;
+
+                                uint64_t timestamp =
+                                    1000000ULL * wire_chnk.timestamp.sec +
+                                    wire_chnk.timestamp.usec;
+
+                                timestamp = timestamp - diffUs;
+
+                                wire_chnk.timestamp.sec =
+                                    timestamp / 1000000ULL;
+                                wire_chnk.timestamp.usec =
+                                    timestamp % 1000000ULL;
                               }
 
                               pcm_chunk_message_t *new_pcmChunk;
@@ -1788,16 +1808,6 @@ static void http_get_task(void *pvParameters) {
                                     memcpy(&tmpData,
                                            &pcmChunk.outData[fragmentCnt],
                                            (scSet.ch * (scSet.bits / 8)));
-                                    //										tmpData
-                                    //=
-                                    //((uint32_t)((buffer[0][i] >> 8) & 0xFF) <<
-                                    // 24) |
-                                    //												  ((uint32_t)((buffer[0][i]
-                                    //>> 0) & 0xFF) << 16) |
-                                    //												  ((uint32_t)((buffer[1][i]
-                                    //>> 8) & 0xFF) << 8) |
-                                    //												  ((uint32_t)((buffer[1][i]
-                                    //>> 0) & 0xFF) << 0);
 
                                     if (fragment != NULL) {
                                       volatile uint32_t *test =
@@ -1816,38 +1826,7 @@ static void http_get_task(void *pvParameters) {
                                   }
                                 }
 
-                                //                                static
-                                //                                uint64_t
-                                //                                oldTimestamp =
-                                //                                0;
-                                //
-                                //                                ESP_LOGW(TAG,
-                                //                                "time step
-                                //                                %lld",
-                                //                                (uint64_t)wire_chnk.timestamp.sec
-                                //                                * 1000000UL +
-                                //                                								(uint64_t)wire_chnk.timestamp.usec
-                                //                                -
-                                //																oldTimestamp);
-
                                 new_pcmChunk->timestamp = wire_chnk.timestamp;
-
-                                //                                int64_t
-                                //                                chunkStart =
-                                //                                (int64_t)new_pcmChunk->timestamp.sec
-                                //                                * 1000000LL +
-                                //                                                     (int64_t)new_pcmChunk->timestamp.usec;
-                                //                                ESP_LOGE(TAG,
-                                //                                "%lld, %d",
-                                //                                chunkStart,
-                                //                                new_pcmChunk->fragment->size);
-
-                                //                                 oldTimestamp
-                                //                                 =
-                                //                                 (uint64_t)wire_chnk.timestamp.sec
-                                //                                 * 1000000ULL
-                                //                                 +
-                                //                                 (uint64_t)wire_chnk.timestamp.usec;
 
 #if CONFIG_USE_DSP_PROCESSOR
                                 if (new_pcmChunk.fragment->payload) {

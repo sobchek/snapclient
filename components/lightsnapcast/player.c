@@ -867,10 +867,10 @@ int32_t allocate_pcm_chunk_memory_caps(pcm_chunk_message_t *pcmChunk,
 
       pcmChunk->fragment->payload = (char *)heap_caps_malloc(bytes, caps);
       if (pcmChunk->fragment->payload == NULL) {
-        ESP_LOGE(
-            TAG,
-            "Failed to heap_caps_malloc(%u, %ld) memory for pcm chunk payload",
-            bytes, caps);
+        ESP_LOGD(TAG, "Failed to allocate %d bytes of %s for pcm chunk payload",
+                 bytes,
+                 (caps == (MALLOC_CAP_32BIT | MALLOC_CAP_EXEC)) ? ("IRAM")
+                                                                : ("DRAM"));
 
         ret = -2;
       } else {
@@ -1182,7 +1182,6 @@ static void player_task(void *pvParameters) {
   int64_t clientDacLatency_us = 0;
   int64_t diff2Server;
   int64_t outputBufferDacTime = 0;
-  static int64_t lastChunkStart = 0;
 
   memset(&scSet, 0, sizeof(snapcastSetting_t));
 
@@ -1345,13 +1344,6 @@ static void player_task(void *pvParameters) {
         }
 #endif
 
-        // ESP_LOGE(TAG, "next chunk scheduled in %lld, (%lld, %lld), age %lld",
-        // chunkStart - lastChunkStart, chunkStart, lastChunkStart, age);
-        //                ESP_LOGE(TAG, "%lld, %d", chunkStart,
-        //                chnk->fragment->size);
-
-        lastChunkStart = chunkStart;
-
         //         ESP_LOGE(TAG, "age: %lld, serverNow %lld, chunkStart %lld, "
         //        		 	   "buf_us %lld", age, serverNow,
         //        chunkStart, buf_us);
@@ -1361,14 +1353,7 @@ static void player_task(void *pvParameters) {
           // buffer so in that case we don't need to add this
           age += outputBufferDacTime;
 
-          if (chnk->fragment->size > (size_t)4608UL) {
-            //        	  age += chkDur_us;
-            // ESP_LOGE(TAG, "age 1 %lld", age);
-          } else {
-            // ESP_LOGE(TAG, "age 2 %lld", age);
-          }
-
-          //          ESP_LOGE(TAG, "age %lld", age);
+          // ESP_LOGE(TAG, "age %lld", age);
         }
       } else {
         // ESP_LOGW(TAG, "couldn't get server now");
@@ -1413,14 +1398,6 @@ static void player_task(void *pvParameters) {
                   server_now(&serverNow, &diff2Server);
                   int64_t tmpAge =
                       serverNow - chunkStart - buf_us + clientDacLatency_us;
-
-                  // ESP_LOGE(TAG, "next chunk scheduled in %lld, (%lld, %lld),
-                  // age %lld", chunkStart - lastChunkStart, chunkStart,
-                  // lastChunkStart, tmpAge);
-                  //                    ESP_LOGE(TAG, "chunk scheduled in %lld",
-                  //                    tmpAge);
-
-                  lastChunkStart = chunkStart;
                 }
               }
             }
@@ -1431,7 +1408,6 @@ static void player_task(void *pvParameters) {
 
             ESP_ERROR_CHECK(
                 i2s_channel_preload_data(tx_chan, p_payload, size, &written));
-            ESP_LOGE(TAG, "preload %d bytes", written);
 
             // check if DMA is full at first try here
             if (fragment->size >= (CHNK_CTRL_CNT * scSet.chkInFrames *
@@ -1450,8 +1426,6 @@ static void player_task(void *pvParameters) {
               } else {
                 free_pcm_chunk(chnk);
                 chnk = NULL;
-
-                ESP_LOGE(TAG, "free");
               }
             }
 
@@ -1631,12 +1605,13 @@ static void player_task(void *pvParameters) {
           //          ESP_LOGI(TAG, "%d, %lldus, q %d", dir, avg,
           //                   uxQueueMessagesWaiting(pcmChkQHdl));
 
-          ESP_LOGI(TAG, "%d, %lldus, %lldus %llds, %lld.%lldms", dir, age, avg,
-                   sec, msec, usec);
+          // ESP_LOGI(TAG, "%d, %lldus, %lldus %llds, %lld.%lldms, %ld", dir,
+          // age, avg,
+          //          sec, msec, usec, insertedSamplesCounter);
 
-          // ESP_LOGI(TAG, "%d, %lldus, %lldus, %lldus, q:%d", dir, avg,
-          //          shortMedian, miniMedian,
-          //          uxQueueMessagesWaiting(pcmChkQHdl));
+          ESP_LOGI(TAG, "%d, %lldus, %lldus, %lldus, q:%d, %ld", dir, avg,
+                   shortMedian, miniMedian, uxQueueMessagesWaiting(pcmChkQHdl),
+                   insertedSamplesCounter);
 
           //           ESP_LOGI( TAG, "8b f
           //           %d b %d", heap_caps_get_free_size(MALLOC_CAP_8BIT |
