@@ -148,18 +148,23 @@ static esp_err_t player_setup_i2s(i2s_port_t i2sNum,
   const int __dmaBufMaxLen = 1024;
   int __dmaBufCnt;
   int __dmaBufLen;
+  int factor = 2;
 
   __dmaBufCnt = 1;
   __dmaBufLen = setting->chkInFrames;
   while ((__dmaBufLen >= __dmaBufMaxLen) || (__dmaBufCnt <= 1)) {
-    if ((__dmaBufLen % 2) == 0) {
-      __dmaBufCnt *= 2;
-      __dmaBufLen /= 2;
+    if ((__dmaBufLen % factor) == 0) {
+      __dmaBufCnt *= factor;
+      __dmaBufLen /= factor;
     } else {
-      ESP_LOGE(TAG,
-               "player_setup_i2s: Can't setup i2s with this configuration");
-
-      return -1;
+      factor++;
+      if ((__dmaBufLen / factor) == 0) {
+        ESP_LOGE(TAG,
+                 "player_setup_i2s: Can't setup i2s with this configuration, "
+                 "dma_buf_len is %d, dma_buf_count is %d",
+                 __dmaBufLen, __dmaBufCnt);
+        return -1;
+      }
     }
   }
 
@@ -1333,14 +1338,16 @@ static void player_task(void *pvParameters) {
         age = serverNow - chunkStart - buf_us + clientDacLatency_us;
 #if USE_BIG_DMA_BUFFER && USE_SAMPLE_INSERTION
         savedAge = age;
+        int divider = (scSet.chkInFrames / i2sDmaBufMaxLen);
+
         if (insertedSamplesCounter > 0) {
           age -= (((1 + insertedSamplesCounter / i2sDmaBufMaxLen) * chkDur_us /
-                   2) -
+                   divider) -
                   (insertedSamplesCounter * 1000000UL / scSet.sr));
         } else if (insertedSamplesCounter < 0) {
-          age +=
-              (((-insertedSamplesCounter / i2sDmaBufMaxLen) * chkDur_us / 2) -
-               (-insertedSamplesCounter * 1000000UL / scSet.sr));
+          age += (((-insertedSamplesCounter / i2sDmaBufMaxLen) * chkDur_us /
+                   divider) -
+                  (-insertedSamplesCounter * 1000000UL / scSet.sr));
         }
 #endif
 
