@@ -78,10 +78,10 @@ static FLAC__StreamDecoder *flacDecoder = NULL;
 
 const char *VERSION_STRING = "0.0.3";
 
-#define HTTP_TASK_PRIORITY 9
+#define HTTP_TASK_PRIORITY 5
 #define HTTP_TASK_CORE_ID tskNO_AFFINITY  // 1  // tskNO_AFFINITY
 
-#define OTA_TASK_PRIORITY 6
+#define OTA_TASK_PRIORITY 4
 #define OTA_TASK_CORE_ID tskNO_AFFINITY
 
 TaskHandle_t t_ota_task = NULL;
@@ -472,6 +472,9 @@ static void http_get_task(void *pvParameters) {
   struct netbuf *newNetBuf = NULL;
   uint16_t len;
   uint64_t timeout = FAST_SYNC_LATENCY_BUF;
+  char *codecString = NULL;
+  char *codecPayload = NULL;
+  char *serverSettingsString = NULL;
 
   // create a timer to send time sync messages every x µs
   esp_timer_create(&tSyncArgs, &timeSyncMessageTimer);
@@ -482,27 +485,49 @@ static void http_get_task(void *pvParameters) {
 #endif
 
   while (1) {
-    received_header = false;
+    // do some house keeping
+    {
+      received_header = false;
 
-    if (reset_latency_buffer() < 0) {
-      ESP_LOGE(TAG,
-               "reset_diff_buffer: couldn't reset median filter long. STOP");
-      return;
-    }
+      timeout = FAST_SYNC_LATENCY_BUF;
 
-    timeout = FAST_SYNC_LATENCY_BUF;
+      esp_timer_stop(timeSyncMessageTimer);
 
-    esp_timer_stop(timeSyncMessageTimer);
+      if (opusDecoder != NULL) {
+        opus_decoder_destroy(opusDecoder);
+        opusDecoder = NULL;
+      }
 
-    if (opusDecoder != NULL) {
-      opus_decoder_destroy(opusDecoder);
-      opusDecoder = NULL;
-    }
+      if (flacDecoder != NULL) {
+        FLAC__stream_decoder_finish(flacDecoder);
+        FLAC__stream_decoder_delete(flacDecoder);
+        flacDecoder = NULL;
+      }
 
-    if (flacDecoder != NULL) {
-      FLAC__stream_decoder_finish(flacDecoder);
-      FLAC__stream_decoder_delete(flacDecoder);
-      flacDecoder = NULL;
+      if (decoderChunk.inData) {
+        free(decoderChunk.inData);
+        decoderChunk.inData = NULL;
+      }
+
+      if (decoderChunk.outData) {
+        free(decoderChunk.outData);
+        decoderChunk.outData = NULL;
+      }
+
+      if (codecString) {
+        free(codecString);
+        codecString = NULL;
+      }
+
+      if (codecPayload) {
+        free(codecPayload);
+        codecPayload = NULL;
+      }
+
+      if (codecPayload) {
+        free(serverSettingsString);
+        serverSettingsString = NULL;
+      }
     }
 
 #if SNAPCAST_SERVER_USE_MDNS
@@ -576,6 +601,7 @@ static void http_get_task(void *pvParameters) {
       ESP_LOGE(TAG, "can't connect to remote %s:%d, err %d",
                ipaddr_ntoa(&remote_ip), remotePort, rc2);
     }
+
     if (rc1 != ERR_OK || rc2 != ERR_OK) {
       netconn_close(lwipNetconn);
       netconn_delete(lwipNetconn);
@@ -585,6 +611,12 @@ static void http_get_task(void *pvParameters) {
     }
 
     ESP_LOGI(TAG, "netconn connected");
+
+    if (reset_latency_buffer() < 0) {
+      ESP_LOGE(TAG,
+               "reset_diff_buffer: couldn't reset median filter long. STOP");
+      return;
+    }
 
     char mac_address[18];
     uint8_t base_mac[6];
@@ -657,17 +689,16 @@ static void http_get_task(void *pvParameters) {
     hello_message_serialized = NULL;
 
     // init default setting
-    scSet.buf_ms = 0;
+    scSet.buf_ms = 500;
     scSet.codec = NONE;
-    scSet.bits = 0;
-    scSet.ch = 0;
-    scSet.sr = 0;
+    scSet.bits = 16;
+    scSet.ch = 2;
+    scSet.sr = 44100;
     scSet.chkInFrames = 0;
     scSet.volume = 0;
     scSet.muted = true;
 
     uint64_t startTime, endTime;
-    char *p_tmp = NULL;
     int32_t remainderSize = 0;
     size_t currentPos = 0;
     size_t typedMsgCurrentPos = 0;
@@ -1058,6 +1089,10 @@ static void http_get_task(void *pvParameters) {
                         decoderChunk.inData =
                             (uint8_t *)malloc(decoderChunk.bytes);
                         if (!decoderChunk.inData) {
+                          ESP_LOGW(TAG,
+                                   "malloc decoderChunk.inData failed, wait "
+                                   "1ms and try again");
+
                           vTaskDelay(pdMS_TO_TICKS(1));
                         }
                       }
@@ -1085,82 +1120,6 @@ static void http_get_task(void *pvParameters) {
 
                       if (received_header == true) {
                         switch (codec) {
-                            //                          case OPUS: {
-                            //                            if (opusData == NULL)
-                            //                            {
-                            //                              // TODO: insert some
-                            //                              break condition if
-                            //                              we wait
-                            //                              // too long
-                            //                              while ((opusData =
-                            //                              (uint8_t *)malloc(
-                            //                                          wire_chnk.size))
-                            //                                          == NULL)
-                            //                                          {
-                            //                                ESP_LOGE(TAG,
-                            //                                "couldn't memory
-                            //                                for opusData");
-                            //
-                            //                                vTaskDelay(pdMS_TO_TICKS(1));
-                            //                              }
-                            //
-                            //                              payloadOffset = 0;
-                            //                            }
-                            //
-                            //                            memcpy(&opusData[payloadOffset],
-                            //                            start, tmp_size);
-                            //                            payloadOffset +=
-                            //                            tmp_size;
-                            //
-                            //                            //
-                            //                            ESP_LOGE(TAG,"payloadOffset
-                            //                            // %d, wire_chnk.size
-                            //                            // %d", payloadOffset,
-                            //                            // wire_chnk.size);
-                            //
-                            //                            if (payloadOffset >=
-                            //                            wire_chnk.size) {
-                            //                              pDecData = NULL;
-                            //                              while (!pDecData) {
-                            //                                pDecData =
-                            //                                (decoderData_t
-                            //                                *)malloc(
-                            //                                    sizeof(decoderData_t));
-                            //                                if (!pDecData) {
-                            //                                  vTaskDelay(pdMS_TO_TICKS(1));
-                            //                                }
-                            //                              }
-                            //
-                            //                              // store timestamp
-                            //                              for
-                            //                              // later use
-                            //                              pDecData->timestamp
-                            //                              =
-                            //                              wire_chnk.timestamp;
-                            //                              pDecData->inData =
-                            //                              opusData;
-                            //                              pDecData->bytes =
-                            //                              wire_chnk.size;
-                            //                              pDecData->outData =
-                            //                              NULL; pDecData->type
-                            //                              =
-                            //                              SNAPCAST_MESSAGE_WIRE_CHUNK;
-                            //
-                            //                              // send data to
-                            //                              separate task which
-                            //                              will handle
-                            //                              // this
-                            //                              xQueueSend(decoderTaskQHdl,
-                            //                              &pDecData,
-                            //                                         portMAX_DELAY);
-                            //
-                            //                              opusData = NULL;
-                            //                              pDecData = NULL;
-                            //                            }
-                            //
-                            //                            break;
-                            //                          }
-
                           case OPUS:
                           case FLAC: {
                             memcpy(&decoderChunk.inData[payloadOffset], start,
@@ -1252,9 +1211,9 @@ static void http_get_task(void *pvParameters) {
                         if (received_header == true) {
                           switch (codec) {
                             case OPUS: {
-                              int frame_size = 0;
-                              int samples_per_frame = 0;
-                              opus_int16 *audio;
+                              int frame_size = -1;
+                              int samples_per_frame;
+                              opus_int16 *audio = NULL;
 
                               samples_per_frame =
                                   opus_packet_get_samples_per_frame(
@@ -1267,87 +1226,95 @@ static void http_get_task(void *pvParameters) {
 
                               scSet.chkInFrames = samples_per_frame;
 
+                              // ESP_LOGW(TAG, "%d, %llu, %llu",
+                              // samples_per_frame, 1000000ULL *
+                              // samples_per_frame / scSet.sr,
+                              // 1000000ULL *
+                              // wire_chnk.timestamp.sec +
+                              // wire_chnk.timestamp.usec);
+
                               // ESP_LOGW(TAG, "got OPUS decoded chunk size: %ld
-                              // frames from encoded chunk with size %d",
-                              //          scSet.chkInFrames, wire_chnk.size);
+                              // " "frames from encoded chunk with size %d,
+                              // allocated audio buffer %d", scSet.chkInFrames,
+                              // wire_chnk.size, samples_per_frame);
 
-                              size_t bytes =
-                                  samples_per_frame * scSet.ch * scSet.bits / 8;
+                              size_t bytes;
+                              do {
+                                bytes = samples_per_frame *
+                                        (scSet.ch * scSet.bits >> 3);
 
-                              // TODO: insert some break condition if we wait
-                              // too long
-                              while ((audio = (opus_int16 *)malloc(bytes)) ==
-                                     NULL) {
-                                ESP_LOGE(TAG,
-                                         "couldn't get memory for OPUS audio");
+                                while ((audio = (opus_int16 *)realloc(
+                                            audio, bytes)) == NULL) {
+                                  ESP_LOGE(TAG,
+                                           "couldn't realloc memory for OPUS "
+                                           "audio %d",
+                                           bytes);
 
-                                vTaskDelay(pdMS_TO_TICKS(1));
-                              }
+                                  vTaskDelay(pdMS_TO_TICKS(1));
+                                }
 
-                              frame_size = opus_decode(
-                                  opusDecoder, decoderChunk.inData,
-                                  decoderChunk.bytes, (opus_int16 *)audio,
-                                  samples_per_frame, 0);
+                                frame_size = opus_decode(
+                                    opusDecoder, decoderChunk.inData,
+                                    decoderChunk.bytes, (opus_int16 *)audio,
+                                    samples_per_frame, 0);
+
+                                samples_per_frame <<= 1;
+                              } while (frame_size < 0);
 
                               free(decoderChunk.inData);
                               decoderChunk.inData = NULL;
 
-                              if (frame_size < 0) {
-                                ESP_LOGE(TAG, "Decode error : %d \n",
-                                         frame_size);
+                              pcm_chunk_message_t *new_pcmChunk = NULL;
+
+                              // ESP_LOGW(TAG, "OPUS decode: %d", frame_size);
+
+                              if (allocate_pcm_chunk_memory(&new_pcmChunk,
+                                                            bytes) < 0) {
+                                pcmData = NULL;
                               } else {
-                                pcm_chunk_message_t *new_pcmChunk = NULL;
+                                new_pcmChunk->timestamp = wire_chnk.timestamp;
 
-                                bytes = frame_size * scSet.ch * scSet.bits / 8;
-                                if (allocate_pcm_chunk_memory(&new_pcmChunk,
-                                                              bytes) < 0) {
-                                  pcmData = NULL;
-                                } else {
-                                  new_pcmChunk->timestamp = wire_chnk.timestamp;
+                                if (new_pcmChunk->fragment->payload) {
+                                  volatile uint32_t *sample;
+                                  uint32_t tmpData;
+                                  uint32_t cnt = 0;
 
-                                  if (new_pcmChunk->fragment->payload) {
-                                    volatile uint32_t *sample;
-                                    uint32_t tmpData;
-                                    uint32_t cnt = 0;
+                                  for (int i = 0; i < bytes; i += 4) {
+                                    sample = (volatile uint32_t *)(&(
+                                        new_pcmChunk->fragment->payload[i]));
+                                    tmpData = (((uint32_t)audio[cnt] << 16) &
+                                               0xFFFF0000) |
+                                              (((uint32_t)audio[cnt + 1] << 0) &
+                                               0x0000FFFF);
+                                    *sample = (volatile uint32_t)tmpData;
 
-                                    for (int i = 0; i < bytes; i += 4) {
-                                      sample = (volatile uint32_t *)(&(
-                                          new_pcmChunk->fragment->payload[i]));
-                                      tmpData =
-                                          (((uint32_t)audio[cnt] << 16) &
-                                           0xFFFF0000) |
-                                          (((uint32_t)audio[cnt + 1] << 0) &
-                                           0x0000FFFF);
-                                      *sample = (volatile uint32_t)tmpData;
-
-                                      cnt += 2;
-                                    }
+                                    cnt += 2;
                                   }
+                                }
 
-                                  free(audio);
-                                  audio = NULL;
+                                free(audio);
+                                audio = NULL;
 
 #if CONFIG_USE_DSP_PROCESSOR
-                                  if (new_pcmChunk->fragment->payload) {
-                                    dsp_processor_worker(
-                                        new_pcmChunk->fragment->payload,
-                                        new_pcmChunk->fragment->size, scSet.sr);
-                                  }
+                                if (new_pcmChunk->fragment->payload) {
+                                  dsp_processor_worker(
+                                      new_pcmChunk->fragment->payload,
+                                      new_pcmChunk->fragment->size, scSet.sr);
+                                }
 #endif
 
-                                  insert_pcm_chunk(new_pcmChunk);
-                                }
+                                insert_pcm_chunk(new_pcmChunk);
+                              }
 
-                                if (player_send_snapcast_setting(&scSet) !=
-                                    pdPASS) {
-                                  ESP_LOGE(TAG,
-                                           "Failed to notify "
-                                           "sync task about "
-                                           "codec. Did you "
-                                           "init player?");
+                              if (player_send_snapcast_setting(&scSet) !=
+                                  pdPASS) {
+                                ESP_LOGE(TAG,
+                                         "Failed to notify "
+                                         "sync task about "
+                                         "codec. Did you "
+                                         "init player?");
 
-                                  return;
-                                }
+                                return;
                               }
 
                               break;
@@ -1397,8 +1364,7 @@ static void http_get_task(void *pvParameters) {
 
                               // ESP_LOGE (TAG, "block size: %ld",
                               // scSet.chkInFrames * scSet.bits / 8 * scSet.ch);
-                              //							  ESP_LOGI
-                              //(TAG, "new_pcmChunk with size %ld",
+                              // ESP_LOGI(TAG, "new_pcmChunk with size %ld",
                               // new_pcmChunk->totalSize);
 
                               if (ret == 0) {
@@ -1515,6 +1481,9 @@ static void http_get_task(void *pvParameters) {
 
                               pcmData = NULL;
 
+                              free(decoderChunk.inData);
+                              decoderChunk.inData = NULL;
+
                               break;
                             }
 
@@ -1595,9 +1564,10 @@ static void http_get_task(void *pvParameters) {
                     case 3: {
                       typedMsgLen |= (*start & 0xFF) << 24;
 
-                      p_tmp = malloc(typedMsgLen + 1);  // allocate memory for
-                                                        // codec string
-                      if (p_tmp == NULL) {
+                      codecString =
+                          malloc(typedMsgLen + 1);  // allocate memory for
+                                                    // codec string
+                      if (codecString == NULL) {
                         ESP_LOGE(TAG,
                                  "couldn't get memory "
                                  "for codec string");
@@ -1622,7 +1592,7 @@ static void http_get_task(void *pvParameters) {
 
                     case 4: {
                       if (len >= typedMsgLen) {
-                        memcpy(&p_tmp[offset], start, typedMsgLen);
+                        memcpy(&codecString[offset], start, typedMsgLen);
 
                         offset += typedMsgLen;
 
@@ -1631,7 +1601,7 @@ static void http_get_task(void *pvParameters) {
                         currentPos += typedMsgLen;
                         len -= typedMsgLen;
                       } else {
-                        memcpy(&p_tmp[offset], start, typedMsgLen);
+                        memcpy(&codecString[offset], start, typedMsgLen);
 
                         offset += len;
 
@@ -1643,20 +1613,21 @@ static void http_get_task(void *pvParameters) {
 
                       if (offset == typedMsgLen) {
                         // NULL terminate string
-                        p_tmp[typedMsgLen] = 0;
+                        codecString[typedMsgLen] = 0;
 
                         // ESP_LOGI (TAG, "got codec string: %s", tmp);
 
-                        if (strcmp(p_tmp, "opus") == 0) {
+                        if (strcmp(codecString, "opus") == 0) {
                           codec = OPUS;
-                        } else if (strcmp(p_tmp, "flac") == 0) {
+                        } else if (strcmp(codecString, "flac") == 0) {
                           codec = FLAC;
-                        } else if (strcmp(p_tmp, "pcm") == 0) {
+                        } else if (strcmp(codecString, "pcm") == 0) {
                           codec = PCM;
                         } else {
                           codec = NONE;
 
-                          ESP_LOGI(TAG, "Codec : %s not supported", p_tmp);
+                          ESP_LOGI(TAG, "Codec : %s not supported",
+                                   codecString);
                           ESP_LOGI(TAG,
                                    "Change encoder codec to "
                                    "opus, flac or pcm in "
@@ -1666,8 +1637,8 @@ static void http_get_task(void *pvParameters) {
                           return;
                         }
 
-                        free(p_tmp);
-                        p_tmp = NULL;
+                        free(codecString);
+                        codecString = NULL;
 
                         internalState++;
                       }
@@ -1717,12 +1688,12 @@ static void http_get_task(void *pvParameters) {
                     case 8: {
                       typedMsgLen |= (*start & 0xFF) << 24;
 
-                      p_tmp = malloc(typedMsgLen);  // allocate memory for
-                                                    // codec string
-                      if (p_tmp == NULL) {
+                      codecPayload = malloc(typedMsgLen);  // allocate memory
+                                                           // for codec payload
+                      if (codecPayload == NULL) {
                         ESP_LOGE(TAG,
                                  "couldn't get memory "
-                                 "for codec string");
+                                 "for codec payload");
 
                         return;
                       }
@@ -1741,7 +1712,7 @@ static void http_get_task(void *pvParameters) {
 
                     case 9: {
                       if (len >= typedMsgLen) {
-                        memcpy(&p_tmp[offset], start, typedMsgLen);
+                        memcpy(&codecPayload[offset], start, typedMsgLen);
 
                         offset += typedMsgLen;
 
@@ -1750,7 +1721,7 @@ static void http_get_task(void *pvParameters) {
                         currentPos += typedMsgLen;
                         len -= typedMsgLen;
                       } else {
-                        memcpy(&p_tmp[offset], start, len);
+                        memcpy(&codecPayload[offset], start, len);
 
                         offset += len;
 
@@ -1783,9 +1754,10 @@ static void http_get_task(void *pvParameters) {
                           uint32_t rate;
                           uint16_t bits;
 
-                          memcpy(&rate, p_tmp + 4, sizeof(rate));
-                          memcpy(&bits, p_tmp + 8, sizeof(bits));
-                          memcpy(&channels, p_tmp + 10, sizeof(channels));
+                          memcpy(&rate, codecPayload + 4, sizeof(rate));
+                          memcpy(&bits, codecPayload + 8, sizeof(bits));
+                          memcpy(&channels, codecPayload + 10,
+                                 sizeof(channels));
 
                           scSet.codec = codec;
                           scSet.bits = bits;
@@ -1809,7 +1781,8 @@ static void http_get_task(void *pvParameters) {
                           decoderChunk.bytes = typedMsgLen;
                           decoderChunk.inData =
                               (uint8_t *)malloc(decoderChunk.bytes);
-                          memcpy(decoderChunk.inData, p_tmp, typedMsgLen);
+                          memcpy(decoderChunk.inData, codecPayload,
+                                 typedMsgLen);
                           decoderChunk.outData = NULL;
                           decoderChunk.type = SNAPCAST_MESSAGE_CODEC_HEADER;
 
@@ -1843,9 +1816,10 @@ static void http_get_task(void *pvParameters) {
                           uint32_t rate;
                           uint16_t bits;
 
-                          memcpy(&channels, p_tmp + 22, sizeof(channels));
-                          memcpy(&rate, p_tmp + 24, sizeof(rate));
-                          memcpy(&bits, p_tmp + 34, sizeof(bits));
+                          memcpy(&channels, codecPayload + 22,
+                                 sizeof(channels));
+                          memcpy(&rate, codecPayload + 24, sizeof(rate));
+                          memcpy(&bits, codecPayload + 34, sizeof(bits));
 
                           scSet.codec = codec;
                           scSet.bits = bits;
@@ -1863,9 +1837,15 @@ static void http_get_task(void *pvParameters) {
                           return;
                         }
 
-                        if (p_tmp) {
-                          free(p_tmp);
-                          p_tmp = NULL;
+                        free(codecPayload);
+                        codecPayload = NULL;
+
+                        if (player_send_snapcast_setting(&scSet) != pdPASS) {
+                          ESP_LOGE(TAG,
+                                   "Failed to notify sync task. "
+                                   "Did you init player?");
+
+                          return;
                         }
 
                         // ESP_LOGI(TAG, "done codec header msg");
@@ -1992,23 +1972,24 @@ static void http_get_task(void *pvParameters) {
                       // string at this point there is still
                       // plenty of RAM available, so we use
                       // malloc and netbuf_copy() here
-                      p_tmp = malloc(typedMsgLen + 1);
+                      serverSettingsString = malloc(typedMsgLen + 1);
 
-                      if (p_tmp == NULL) {
+                      if (serverSettingsString == NULL) {
                         ESP_LOGE(TAG,
                                  "couldn't get memory for "
                                  "server settings string");
                       } else {
-                        netbuf_copy_partial(firstNetBuf, p_tmp, typedMsgLen,
-                                            currentPos);
+                        netbuf_copy_partial(firstNetBuf, serverSettingsString,
+                                            typedMsgLen, currentPos);
 
-                        p_tmp[typedMsgLen] = 0;  // NULL terminate string
+                        serverSettingsString[typedMsgLen] =
+                            0;  // NULL terminate string
 
                         // ESP_LOGI
                         //(TAG, "got string: %s", tmp);
 
                         result = server_settings_message_deserialize(
-                            &server_settings_message, p_tmp);
+                            &server_settings_message, serverSettingsString);
                         if (result) {
                           ESP_LOGE(TAG,
                                    "Failed to read server "
@@ -2066,8 +2047,8 @@ static void http_get_task(void *pvParameters) {
                           return;
                         }
 
-                        free(p_tmp);
-                        p_tmp = NULL;
+                        free(serverSettingsString);
+                        serverSettingsString = NULL;
                       }
 
                       internalState++;
@@ -2532,7 +2513,7 @@ void app_main(void) {
   }
 #endif
 
-  ESP_LOGI(TAG, "init player");
+  //  ESP_LOGI(TAG, "init player");
   init_player();
   // setup_ma120();
 

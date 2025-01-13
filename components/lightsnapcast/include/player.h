@@ -1,7 +1,7 @@
 #ifndef __PLAYER_H__
 #define __PLAYER_H__
 
-#include "driver/i2s.h"
+#include "driver/i2s_std.h"
 #include "esp_types.h"
 #include "freertos/FreeRTOS.h"
 #include "sdkconfig.h"
@@ -37,6 +37,7 @@ typedef struct pcmData {
   tv_t timestamp;
   size_t totalSize;
   pcm_chunk_fragment_t *fragment;
+  uint32_t caps;
 } pcm_chunk_message_t;
 
 typedef enum codec_type_e { NONE = 0, PCM, FLAC, OGG, OPUS } codec_type_t;
