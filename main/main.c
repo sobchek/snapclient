@@ -78,7 +78,7 @@ static FLAC__StreamDecoder *flacDecoder = NULL;
 
 const char *VERSION_STRING = "0.0.3";
 
-#define HTTP_TASK_PRIORITY 5
+#define HTTP_TASK_PRIORITY 9
 #define HTTP_TASK_CORE_ID tskNO_AFFINITY  // 1  // tskNO_AFFINITY
 
 #define OTA_TASK_PRIORITY 4
