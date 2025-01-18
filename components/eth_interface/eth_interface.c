@@ -10,21 +10,25 @@
 #include <string.h>
 
 #include "driver/gpio.h"
-
-#if CONFIG_ETH_USE_SPI_ETHERNET
-#include "driver/spi_master.h"
-#endif  // CONFIG_ETH_USE_SPI_ETHERNET
-
 #include "esp_eth.h"
 #include "esp_event.h"
 #include "esp_log.h"
+#include "esp_mac.h"
 #include "esp_netif.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "freertos/task.h"
-// #include "sdkconfig.h"
+#include "sdkconfig.h"
+#if CONFIG_ETH_USE_SPI_ETHERNET
+#include "driver/spi_master.h"
+#endif  // CONFIG_ETH_USE_SPI_ETHERNET
 
 static const char *TAG = "ETH";
+
+static esp_eth_handle_t s_eth_handle = NULL;
+static esp_eth_mac_t *s_mac = NULL;
+static esp_eth_phy_t *s_phy = NULL;
+static esp_eth_netif_glue_handle_t s_eth_glue = NULL;
 
 /* The event group allows multiple bits for each event, but we only care about
  * two events:
@@ -88,42 +92,41 @@ void eth_init(void) {
   ESP_ERROR_CHECK(esp_netif_init());
   // Create default event loop that running in background
   ESP_ERROR_CHECK(esp_event_loop_create_default());
-  esp_netif_config_t cfg = ESP_NETIF_DEFAULT_ETH();
-  esp_netif_t *eth_netif = esp_netif_new(&cfg);
-  // Set default handlers to process TCP/IP stuffs
-  ESP_ERROR_CHECK(esp_eth_set_default_handlers(eth_netif));
-  // Register user defined event handers
-  ESP_ERROR_CHECK(esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID,
-                                             &eth_event_handler, NULL));
-  ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP,
-                                             &got_ip_event_handler, NULL));
+
+  esp_netif_inherent_config_t esp_netif_config =
+      ESP_NETIF_INHERENT_DEFAULT_ETH();
+  // Warning: the interface desc is used in tests to capture actual connection
+  // details (IP, gw, mask)
+  esp_netif_config.if_desc = "eth";
+  esp_netif_config.route_prio = 64;
+  esp_netif_config_t netif_config = {.base = &esp_netif_config,
+                                     .stack = ESP_NETIF_NETSTACK_DEFAULT_ETH};
+  esp_netif_t *netif = esp_netif_new(&netif_config);
+  assert(netif);
 
   eth_mac_config_t mac_config = ETH_MAC_DEFAULT_CONFIG();
+  mac_config.rx_task_stack_size = 2048;
   eth_phy_config_t phy_config = ETH_PHY_DEFAULT_CONFIG();
   phy_config.phy_addr = CONFIG_SNAPCLIENT_ETH_PHY_ADDR;
   phy_config.reset_gpio_num = CONFIG_SNAPCLIENT_ETH_PHY_RST_GPIO;
-
-  //    phy_config.reset_timeout_ms = 500;
-  //    mac_config.sw_reset_timeout_ms = 500;
-
 #if CONFIG_SNAPCLIENT_USE_INTERNAL_ETHERNET
-  mac_config.smi_mdc_gpio_num = CONFIG_SNAPCLIENT_ETH_MDC_GPIO;
-  mac_config.smi_mdio_gpio_num = CONFIG_SNAPCLIENT_ETH_MDIO_GPIO;
-  esp_eth_mac_t *mac = esp_eth_mac_new_esp32(&mac_config);
+  eth_esp32_emac_config_t esp32_emac_config = ETH_ESP32_EMAC_DEFAULT_CONFIG();
+  esp32_emac_config.smi_mdc_gpio_num = CONFIG_SNAPCLIENT_ETH_MDC_GPIO;
+  esp32_emac_config.smi_mdio_gpio_num = CONFIG_SNAPCLIENT_ETH_MDIO_GPIO;
+  s_mac = esp_eth_mac_new_esp32(&esp32_emac_config, &mac_config);
 #if CONFIG_SNAPCLIENT_ETH_PHY_IP101
-  esp_eth_phy_t *phy = esp_eth_phy_new_ip101(&phy_config);
+  s_phy = esp_eth_phy_new_ip101(&phy_config);
 #elif CONFIG_SNAPCLIENT_ETH_PHY_RTL8201
-  esp_eth_phy_t *phy = esp_eth_phy_new_rtl8201(&phy_config);
+  s_phy = esp_eth_phy_new_rtl8201(&phy_config);
 #elif CONFIG_SNAPCLIENT_ETH_PHY_LAN8720
-  esp_eth_phy_t *phy = esp_eth_phy_new_lan8720(&phy_config);
+  s_phy = esp_eth_phy_new_lan87xx(&phy_config);
 #elif CONFIG_SNAPCLIENT_ETH_PHY_DP83848
-  esp_eth_phy_t *phy = esp_eth_phy_new_dp83848(&phy_config);
+  s_phy = esp_eth_phy_new_dp83848(&phy_config);
 #elif CONFIG_SNAPCLIENT_ETH_PHY_KSZ8041
-  esp_eth_phy_t *phy = esp_eth_phy_new_ksz8041(&phy_config);
+  s_phy = esp_eth_phy_new_ksz80xx(&phy_config);
 #endif
-#elif CONFIG_ETH_USE_SPI_ETHERNET
+#elif CONFIG_SNAPCLIENT_USE_SPI_ETHERNET
   gpio_install_isr_service(0);
-  spi_device_handle_t spi_handle = NULL;
   spi_bus_config_t buscfg = {
       .miso_io_num = CONFIG_SNAPCLIENT_ETH_SPI_MISO_GPIO,
       .mosi_io_num = CONFIG_SNAPCLIENT_ETH_SPI_MOSI_GPIO,
@@ -131,57 +134,64 @@ void eth_init(void) {
       .quadwp_io_num = -1,
       .quadhd_io_num = -1,
   };
-  ESP_ERROR_CHECK(
-      spi_bus_initialize(CONFIG_SNAPCLIENT_ETH_SPI_HOST, &buscfg, 1));
+  ESP_ERROR_CHECK(spi_bus_initialize(CONFIG_SNAPCLIENT_ETH_SPI_HOST, &buscfg,
+                                     SPI_DMA_CH_AUTO));
+  spi_device_interface_config_t spi_devcfg = {
+      .mode = 0,
+      .clock_speed_hz = CONFIG_SNAPCLIENT_ETH_SPI_CLOCK_MHZ * 1000 * 1000,
+      .spics_io_num = CONFIG_SNAPCLIENT_ETH_SPI_CS_GPIO,
+      .queue_size = 20};
 #if CONFIG_SNAPCLIENT_USE_DM9051
-  spi_device_interface_config_t devcfg = {
-      .command_bits = 1,
-      .address_bits = 7,
-      .mode = 0,
-      .clock_speed_hz = CONFIG_SNAPCLIENT_ETH_SPI_CLOCK_MHZ * 1000 * 1000,
-      .spics_io_num = CONFIG_SNAPCLIENT_ETH_SPI_CS_GPIO,
-      .queue_size = 20};
-  ESP_ERROR_CHECK(
-      spi_bus_add_device(CONFIG_SNAPCLIENT_ETH_SPI_HOST, &devcfg, &spi_handle));
   /* dm9051 ethernet driver is based on spi driver */
-  eth_dm9051_config_t dm9051_config = ETH_DM9051_DEFAULT_CONFIG(spi_handle);
+  eth_dm9051_config_t dm9051_config =
+      ETH_DM9051_DEFAULT_CONFIG(CONFIG_SNAPCLIENT_ETH_SPI_HOST, &spi_devcfg);
   dm9051_config.int_gpio_num = CONFIG_SNAPCLIENT_ETH_SPI_INT_GPIO;
-  esp_eth_mac_t *mac = esp_eth_mac_new_dm9051(&dm9051_config, &mac_config);
-  esp_eth_phy_t *phy = esp_eth_phy_new_dm9051(&phy_config);
+  s_mac = esp_eth_mac_new_dm9051(&dm9051_config, &mac_config);
+  s_phy = esp_eth_phy_new_dm9051(&phy_config);
 #elif CONFIG_SNAPCLIENT_USE_W5500
-  spi_device_interface_config_t devcfg = {
-      .command_bits = 16,  // Actually it's the address phase in W5500 SPI frame
-      .address_bits = 8,   // Actually it's the control phase in W5500 SPI frame
-      .mode = 0,
-      .clock_speed_hz = CONFIG_SNAPCLIENT_ETH_SPI_CLOCK_MHZ * 1000 * 1000,
-      .spics_io_num = CONFIG_SNAPCLIENT_ETH_SPI_CS_GPIO,
-      .queue_size = 20};
-  ESP_ERROR_CHECK(
-      spi_bus_add_device(CONFIG_SNAPCLIENT_ETH_SPI_HOST, &devcfg, &spi_handle));
   /* w5500 ethernet driver is based on spi driver */
-  eth_w5500_config_t w5500_config = ETH_W5500_DEFAULT_CONFIG(spi_handle);
+  eth_w5500_config_t w5500_config =
+      ETH_W5500_DEFAULT_CONFIG(CONFIG_SNAPCLIENT_ETH_SPI_HOST, &spi_devcfg);
   w5500_config.int_gpio_num = CONFIG_SNAPCLIENT_ETH_SPI_INT_GPIO;
-  esp_eth_mac_t *mac = esp_eth_mac_new_w5500(&w5500_config, &mac_config);
-  esp_eth_phy_t *phy = esp_eth_phy_new_w5500(&phy_config);
+  s_mac = esp_eth_mac_new_w5500(&w5500_config, &mac_config);
+  s_phy = esp_eth_phy_new_w5500(&phy_config);
 #endif
-#endif  // CONFIG_ETH_USE_SPI_ETHERNET
-  esp_eth_config_t config = ETH_DEFAULT_CONFIG(mac, phy);
-  esp_eth_handle_t eth_handle = NULL;
-  ESP_ERROR_CHECK(esp_eth_driver_install(&config, &eth_handle));
+#elif CONFIG_SNAPCLIENT_USE_OPENETH
+  phy_config.autonego_timeout_ms = 100;
+  s_mac = esp_eth_mac_new_openeth(&mac_config);
+  s_phy = esp_eth_phy_new_dp83848(&phy_config);
+#endif
+
+  // Install Ethernet driver
+  esp_eth_config_t config = ETH_DEFAULT_CONFIG(s_mac, s_phy);
+  ESP_ERROR_CHECK(esp_eth_driver_install(&config, &s_eth_handle));
 #if !CONFIG_SNAPCLIENT_USE_INTERNAL_ETHERNET
   /* The SPI Ethernet module might doesn't have a burned factory MAC address, we
-     cat to set it manually. 02:00:00 is a Locally Administered OUI range so
-     should not be used except when testing on a LAN under your control.
+     cat to set it manually. We set the ESP_MAC_ETH mac address as the default,
+     if you want to use ESP_MAC_EFUSE_CUSTOM mac address, please enable the
+     configuration: `ESP_MAC_USE_CUSTOM_MAC_AS_BASE_MAC`
   */
-  ESP_ERROR_CHECK(
-      esp_eth_ioctl(eth_handle, ETH_CMD_S_MAC_ADDR,
-                    (uint8_t[]){0x02, 0x00, 0x00, 0x12, 0x34, 0x56}));
+  uint8_t eth_mac[6] = {0};
+  ESP_ERROR_CHECK(esp_read_mac(eth_mac, ESP_MAC_ETH));
+  ESP_ERROR_CHECK(esp_eth_ioctl(s_eth_handle, ETH_CMD_S_MAC_ADDR, eth_mac));
 #endif
-  /* attach Ethernet driver to TCP/IP stack */
-  ESP_ERROR_CHECK(
-      esp_netif_attach(eth_netif, esp_eth_new_netif_glue(eth_handle)));
-  /* start Ethernet driver state machine */
-  ESP_ERROR_CHECK(esp_eth_start(eth_handle));
+  // combine driver with netif
+  s_eth_glue = esp_eth_new_netif_glue(s_eth_handle);
+  esp_netif_attach(netif, s_eth_glue);
+
+  // Register user defined event handers
+  ESP_ERROR_CHECK(esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID,
+                                             &eth_event_handler, NULL));
+  ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP,
+                                             &got_ip_event_handler, NULL));
+#ifdef CONFIG_SNAPCLIENT_CONNECT_IPV6
+  ESP_ERROR_CHECK(esp_event_handler_register(
+      ETH_EVENT, ETHERNET_EVENT_CONNECTED, &on_eth_event, netif));
+  ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_GOT_IP6,
+                                             &eth_on_got_ipv6, NULL));
+#endif
+
+  esp_eth_start(s_eth_handle);
 
   /* Waiting until either the connection is established (ETH_CONNECTED_BIT) or
    * connection failed for the maximum number of re-tries (ETH_FAIL_BIT). The

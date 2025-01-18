@@ -29,6 +29,7 @@
 #include "audio_volume.h"
 #include "board.h"
 #include "esp_log.h"
+#include "freertos/projdefs.h"
 #include "i2c_bus.h"
 #include "tas5805m_reg_cfg.h"
 
@@ -95,7 +96,7 @@ static esp_err_t tas5805m_transmit_registers(const tas5805m_cfg_reg_t *conf_buf,
         // Used in legacy applications.  Ignored here.
         break;
       case CFG_META_DELAY:
-        vTaskDelay(conf_buf[i].value / portTICK_RATE_MS);
+        vTaskDelay(pdMS_TO_TICKS(conf_buf[i].value));
         break;
       case CFG_META_BURST:
         ret = i2c_bus_write_bytes(i2c_handler, TAS5805M_ADDR,
@@ -135,9 +136,9 @@ esp_err_t tas5805m_init(audio_hal_codec_config_t *codec_cfg) {
   io_conf.intr_type = GPIO_INTR_DISABLE;
   gpio_config(&io_conf);
   gpio_set_level(TAS5805M_RST_GPIO, 0);
-  vTaskDelay(20 / portTICK_RATE_MS);
+  vTaskDelay(pdMS_TO_TICKS(20));
   gpio_set_level(TAS5805M_RST_GPIO, 1);
-  vTaskDelay(200 / portTICK_RATE_MS);
+  vTaskDelay(pdMS_TO_TICKS(200));
 
   ret = get_i2c_pins(I2C_NUM_0, &i2c_cfg);
   i2c_handler = i2c_bus_create(I2C_NUM_0, &i2c_cfg);
