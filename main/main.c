@@ -1333,7 +1333,8 @@ static void http_get_task(void *pvParameters) {
                                       "failed",
                                       __func__);
 
-                                  return;
+                                  // TODO: should insert some abort condition?
+                                  vTaskDelay(pdMS_TO_TICKS(10));
                                 }
                               }
 

@@ -136,14 +136,12 @@ esp_err_t my_i2s_channel_enable(i2s_chan_handle_t handle) {
 static esp_err_t player_setup_i2s(i2s_port_t i2sNum,
                                   snapcastSetting_t *setting) {
 #if USE_SAMPLE_INSERTION
-  const int __dmaBufMaxLen = 1023;
-
   i2sDmaBufCnt = 22;
-  i2sDmaBufMaxLen =
-      100;  // OPUS has a minimum frame size of 120
-            // with DMA buffer set to this value sync algorithm
-            // works for all decoders. We set it to 100 so
-            // there will be free space for sample stuffing in each round
+  // OPUS has a minimum frame size of 120
+  // with DMA buffer set to this value sync algorithm
+  // works for all decoders. We set it to 100 so
+  // there will be free space for sample stuffing in each round
+  i2sDmaBufMaxLen = 100;
 
 #else
   int fi2s_clk;
@@ -232,13 +230,13 @@ static esp_err_t player_setup_i2s(i2s_port_t i2sNum,
   }
 
   i2s_std_clk_config_t i2s_clkcfg = {
-    .sample_rate_hz = sr,
+      .sample_rate_hz = sr,
 #if CONFIG_USE_SAMPLE_INSERTION
-    .clk_src = I2S_CLK_SRC_DEFAULT,
+      .clk_src = I2S_CLK_SRC_DEFAULT,
 #else
-    .clk_src = I2S_CLK_SRC_APLL,
+      .clk_src = I2S_CLK_SRC_APLL,
 #endif
-    .mclk_multiple = I2S_MCLK_MULTIPLE_256,
+      .mclk_multiple = I2S_MCLK_MULTIPLE_256,
   };
   i2s_std_config_t tx_std_cfg = {
       .clk_cfg = i2s_clkcfg,

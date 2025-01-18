@@ -8,7 +8,13 @@
 */
 #include <stdio.h>
 #include <string.h>
+
 #include "driver/gpio.h"
+
+#if CONFIG_ETH_USE_SPI_ETHERNET
+#include "driver/spi_master.h"
+#endif  // CONFIG_ETH_USE_SPI_ETHERNET
+
 #include "esp_eth.h"
 #include "esp_event.h"
 #include "esp_log.h"
@@ -16,10 +22,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "freertos/task.h"
-#include "sdkconfig.h"
-#if CONFIG_ETH_USE_SPI_ETHERNET
-#include "driver/spi_master.h"
-#endif  // CONFIG_ETH_USE_SPI_ETHERNET
+// #include "sdkconfig.h"
 
 static const char *TAG = "ETH";
 
