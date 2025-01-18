@@ -108,10 +108,12 @@ static bool i2sEnabled = false;
  *
  */
 esp_err_t my_i2s_channel_disable(i2s_chan_handle_t handle) {
-  if (i2sEnabled == true) {
-    i2sEnabled = false;
+  if (tx_chan != NULL) {
+    if (i2sEnabled == true) {
+      i2sEnabled = false;
 
-    return i2s_channel_disable(handle);
+      return i2s_channel_disable(handle);
+    }
   }
 
   return ESP_OK;
@@ -121,10 +123,12 @@ esp_err_t my_i2s_channel_disable(i2s_chan_handle_t handle) {
  *
  */
 esp_err_t my_i2s_channel_enable(i2s_chan_handle_t handle) {
-  if (i2sEnabled == false) {
-    i2sEnabled = true;
+  if (tx_chan != NULL) {
+    if (i2sEnabled == false) {
+      i2sEnabled = true;
 
-    return i2s_channel_enable(handle);
+      return i2s_channel_enable(handle);
+    }
   }
 
   return ESP_OK;
@@ -142,7 +146,6 @@ static esp_err_t player_setup_i2s(i2s_port_t i2sNum,
   // works for all decoders. We set it to 100 so
   // there will be free space for sample stuffing in each round
   i2sDmaBufMaxLen = 100;
-
 #else
   int fi2s_clk;
   const int __dmaBufMaxLen = 1024;
@@ -199,6 +202,9 @@ static esp_err_t player_setup_i2s(i2s_port_t i2sNum,
   }
 #endif
 
+  ESP_LOGI(TAG, "player_setup_i2s: dma_buf_len is %ld, dma_buf_count is %ld",
+           i2sDmaBufMaxLen, i2sDmaBufCnt);
+
   if (tx_chan) {
     my_i2s_channel_disable(tx_chan);
     i2s_del_channel(tx_chan);
@@ -240,8 +246,13 @@ static esp_err_t player_setup_i2s(i2s_port_t i2sNum,
   };
   i2s_std_config_t tx_std_cfg = {
       .clk_cfg = i2s_clkcfg,
+#if CONFIG_I2S_USE_MSB_FORMAT
       .slot_cfg =
-          I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(bits, I2S_SLOT_MODE_STEREO),
+          I2S_STD_MSB_SLOT_DEFAULT_CONFIG(setting->bits, I2S_SLOT_MODE_STEREO),
+#else
+      .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(setting->bits,
+                                                      I2S_SLOT_MODE_STEREO),
+#endif
       .gpio_cfg =
           {
               .mclk = pin_config0.mck_io_num,
@@ -251,19 +262,31 @@ static esp_err_t player_setup_i2s(i2s_port_t i2sNum,
               .din = pin_config0.data_in_num,
               .invert_flags =
                   {
+#if CONFIG_INVERT_MCLK_LEVEL
+                      .mclk_inv = true,
+
+#else
                       .mclk_inv = false,
+#endif
+
+#if CONFIG_INVERT_BCLK_LEVEL
+                      .bclk_inv = true,
+#else
                       .bclk_inv = false,
+#endif
+
+#if CONFIG_INVERT_WORD_SELECT_LEVEL
+                      .ws_inv = true,
+#else
                       .ws_inv = false,
+#endif
                   },
           },
   };
 
   ESP_ERROR_CHECK(i2s_channel_init_std_mode(tx_chan, &tx_std_cfg));
 
-  ESP_LOGI(TAG,
-           "player_setup_i2s: dma_buf_len is %ld, dma_buf_count is %ld, sample "
-           "rate: %ld",
-           i2sDmaBufMaxLen, i2sDmaBufCnt, setting->sr);
+  // my_i2s_channel_enable(tx_chan);
 
   return 0;
 }
@@ -383,8 +406,6 @@ int init_player(void) {
 
   tg0_timer_init();
 
-  ESP_LOGI(TAG, "test");
-
   if (playerTaskHandle == NULL) {
     ESP_LOGI(TAG, "Start player_task");
 
@@ -444,15 +465,6 @@ int32_t player_latency_insert(int64_t newValue) {
     //    else {
     //      ESP_LOGI(TAG, "(not full) latency median: %lldus", medianValue);
     //    }
-
-#if LATENCY_MEDIAN_age_DIVISOR
-    // ESP_LOGI(TAG, "actual latency median: %lldus", medianValue);
-    //    medianValue = MEDIANFILTER_get_median(&latencyMedianFilter,
-    //    ceil((float)LATENCY_MEDIAN_FILTER_LEN /
-    //    (float)LATENCY_MEDIAN_age_DIVISOR));
-    medianValue = MEDIANFILTER_get_median(&latencyMedianFilter, 32);
-// ESP_LOGI(TAG, "age latency median: %lldus", medianValue);
-#endif
 
     latencyToServer = medianValue;
 
@@ -1114,13 +1126,10 @@ int32_t insert_pcm_chunk(pcm_chunk_message_t *pcmChunk) {
 
   // if (xQueueSend(pcmChkQHdl, &pcmChunk, pdMS_TO_TICKS(10)) != pdTRUE) {
   if (xQueueSend(pcmChkQHdl, &pcmChunk, pdMS_TO_TICKS(1)) != pdTRUE) {
-    // if (xQueueSend(pcmChkQHdl, &pcmChunk, portMAX_DELAY) != pdTRUE) {
     ESP_LOGW(TAG, "send: pcmChunkQueue full, messages waiting %d",
              uxQueueMessagesWaiting(pcmChkQHdl));
 
     free_pcm_chunk(pcmChunk);
-  } else {
-    // ESP_LOGI(TAG, "PCM chunk inserted");
   }
 
   return 0;
@@ -1410,6 +1419,37 @@ static void player_task(void *pvParameters) {
 
           // get actual age after alarm
           age = (int64_t)timer_val - (-age);
+
+          // check if we need to write remaining data
+          if (size != 0) {
+            do {
+              written = 0;
+              if (i2s_custom_write(I2S_NUM_0, p_payload, (size_t)size, &written,
+                                   portMAX_DELAY) != ESP_OK) {
+                ESP_LOGE(TAG, "i2s_playback_task: I2S write error");
+              }
+              if (written < size) {
+                ESP_LOGE(TAG,
+                         "i2s_playback_task: I2S didn't "
+                         "write all data");
+              }
+              size -= written;
+              p_payload += written;
+
+              if (size == 0) {
+                if (fragment->nextFragment != NULL) {
+                  fragment = fragment->nextFragment;
+                  p_payload = fragment->payload;
+                  size = fragment->size;
+                } else {
+                  free_pcm_chunk(chnk);
+                  chnk = NULL;
+
+                  break;
+                }
+              }
+            } while (1);
+          }
 
           initialSync = 1;
 

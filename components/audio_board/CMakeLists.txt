@@ -22,6 +22,15 @@ set(COMPONENT_SRCS
 )
 endif()
 
+if (CONFIG_ESP_AI_THINKER_ES8388_BOARD)
+message(STATUS "Current board name is " CONFIG_ESP_AI_THINKER_ES8388_BOARD)
+list(APPEND COMPONENT_ADD_INCLUDEDIRS ./ai_thinker_es8388)
+set(COMPONENT_SRCS
+./ai_thinker_es8388/board.c
+./ai_thinker_es8388/board_pins_config.c
+)
+endif()
+
 if (CONFIG_ESP_LYRAT_MINI_V1_1_BOARD)
 message(STATUS "Current board name is " CONFIG_ESP_LYRAT_MINI_V1_1_BOARD)
 list(APPEND COMPONENT_ADD_INCLUDEDIRS ./lyrat_mini_v1_1)
@@ -60,7 +69,6 @@ set(COMPONENT_SRCS
 )
 endif()
 
-#[[
 if (CONFIG_ESP32_S2_KALUGA_1_V1_2_BOARD)
 message(STATUS "Current board name is " CONFIG_ESP32_S2_KALUGA_1_V1_2_BOARD)
 list(APPEND COMPONENT_ADD_INCLUDEDIRS ./esp32_s2_kaluga_1_v1_2)
@@ -70,6 +78,7 @@ set(COMPONENT_SRCS
 )
 endif()
 
+#[[
 if (CONFIG_ESP32_S3_KORVO2_V3_BOARD)
 message(STATUS "Current board name is " CONFIG_ESP32_S3_KORVO2_V3_BOARD)
 list(APPEND COMPONENT_ADD_INCLUDEDIRS ./esp32_s3_korvo2_v3)

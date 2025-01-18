@@ -7,6 +7,10 @@
 #include "sdkconfig.h"
 #include "snapcast.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define I2S_PORT I2S_NUM_0
 
 // TODO: maybe calculate this dynamically based on chunk duration and buffer
@@ -78,5 +82,7 @@ int32_t get_diff_to_server(int64_t *tDiff);
 int32_t server_now(int64_t *sNow, int64_t *diff2Server);
 
 int32_t pcm_chunk_queue_msg_waiting(void);
-
+#ifdef __cplusplus
+}
+#endif
 #endif  // __PLAYER_H__

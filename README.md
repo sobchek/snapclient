@@ -21,24 +21,21 @@ Please check out the task list and feel free to fill in.
 
 I dropped the usage of ADF completely but copied stripped down, needed components to this project (using <b>ESP-ADF v2.6</b>).
 This was necessary because ADF was using flac in closed source precompiled library
-which made it impossible to get good results for multiroom syncing. IDF's I2S driver was also copied
-to project's components and adapted. Originally it wasn't possible to pre load DMA buffers with audio
-samples and therefore no precise sync could be achieved.
+which made it impossible to get good results for multiroom syncing.
 
 ### Codebase
 
-The codebase is split into components and build on <b>ESP-IDF v4.3.5</b>. I still
+The codebase is split into components and build on <b>ESP-IDF v5.1.1</b>. I still
 have some refactoring on the todo list as the concept has started to settle and
 allow for new features can be added in a structured manner. In the code you
 will find parts that are only partly related features and still not on the task
 list. Also there is a lot of code clean up needed.
 
 Components
- - audio-board : taken from ADF, stripped down to strictly necessary parts for usage with Lyrat v4.3
- - audio-hal : taken from ADF, stripped down to strictly necessary parts for usage with Lyrat v4.3
- - audio-sal : taken from ADF, stripped down to strictly necessary parts for usage with Lyrat v4.3
- - custom_board :
- - custom-driver : modified I2S driver from IDF v4.3.1 which supports preloading DMA buffers with valid data
+ - audio-board : taken from ADF, stripped down to strictly necessary parts for playback
+ - audio-hal : taken from ADF, stripped down to strictly necessary parts for playback
+ - audio-sal : taken from ADF, stripped down to strictly necessary parts for playback
+ - custom_board : generic board component to support easy integration of DACs
  - dsp_processor : Audio Processor, low pass filters, effects, etc.
  - esp-dsp : Submodule to the ESP-ADF done by David Douard
  - esp-peripherals : taken from ADF, stripped down to strictly necessary parts for usage with Lyrat v4.3
@@ -121,12 +118,30 @@ git submodule update --init
 ```
 
 ### ESP-IDF environnement configuration
-- <b>If you're on Windows :</b> Install ESP-IDF v4.3.5 locally [https://github.com/espressif/esp-idf/releases/tag/v4.3.5](https://github.com/espressif/esp-idf/releases/tag/v4.3.5). More info: [https://docs.espressif.com/projects/esp-idf/en/latest/esp32/get-started/windows-setup-update.html](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/get-started/windows-setup-update.html)
-- <b>If you're on Linux :</b> Use the docker image for ESP-IDF by following [docker build](doc/docker_build.md) doc.
+- <b>If you're on Windows :</b> Install [ESP-IDF v5.1.1](https://github.com/espressif/esp-idf/releases/tag/v5.1.1) locally ([More info](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/get-started/windows-setup-update.html)).
+- <b>If you're on Linux (docker) :</b> Use the image for ESP-IDF by following [docker build](doc/docker_build.md) doc
+- <b>If you're on Linux :</b> follow [official Espressif](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/get-started/linux-macos-setup.html) instructions
+  For debian based systems you'll need to do the following:
+  ```
+  sudo apt-get install git wget flex bison gperf python3 python3-pip python3-venv cmake ninja-build ccache libffi-dev libssl-dev dfu-util libusb-1.0-0
+  mkdir -p ~/esp
+  cd ~/esp
+  git clone -b v5.1.1 --recursive https://github.com/espressif/esp-idf.git
+  cd ~/esp/esp-idf
+  ./install.sh esp32
+  . ./export.sh
+  ```
 
 <a name="config"></a>
 ### Snapcast ESP Configuration
-Configure your platform:
+Frist copy one of the template sdkconfig files and rename it to sdkconfig
+
+```
+cp sdkconfig_lyrat_v4.3 sdkconfig
+```
+
+then configure your platform:
+
 ```
 idf.py menuconfig
 ```
@@ -169,6 +184,13 @@ Configure to match your setup
 ```
 idf.py build flash monitor
 ```
+
+### Merge bin to flash at 0x0 with web.esphome.io
+
+```
+esptool.py --chip esp32  merge_bin -o merged.bin --flash_size 4MB --flash_freq 80m 0x1000 build/bootloader/bootloader.bin 0x8000 build/partition_table/partition-table.bin 0xd000 build/ota_data_initial.bin 0x10000 build/snapclient.bin 0x370000 build/storage.bin
+```
+
 ## Test
 Setup a snapcast server on your network
 
@@ -209,29 +231,13 @@ Then on every `git commit`, a few sanity/formatting checks will be performed.
 
 
 ## Task list
-- [ok] Fix to alinge with above
-- [ok] put kconfig to better locations in tree
- * add codec description
-- [ok] Integrate ESP wifi provision
-- [ok] Find and connect to Avahi broadcasted Snapcast server name
-- [ ] Add a client command interface layer like volume/mute control
+- [ ] put kconfig to better locations in tree
 - [ ] add missing codec's (ogg)
-- [ok] test esp-dsp functionality after ADF drop
-- [ok] Check compatibility with different HW than Lyrat v4.3
-- [ok] rework dsp_processor and test. At the moment only dspfStereo and dspfBassBoost will work. Also ensure/test we got enough RAM on WROVER modules
-- [ ] reduce dsp_processor memory footprint
 - [ ] dsp_processor: add equalizer
- * Control interface for equalizer
+- [ ] Control interface for equalizer (component: ui_http_server)
 - [ ] clean and polish code (remove all unused variables etc.)
-- [ok] Improve Documentation, e.g. Hardware guide (supported codecs)
-- [ ] upgrade to IDF v5
-- [ ] in IDF v5 use native i2s driver, as it supports preloading DMA buffer with valid data now
+- [ ] Improve Documentation
 - [ ] Throw out ADF copied components from project tree and use CmakeLists.txt to pull in necessary files from ADF
 
 ## Minor task
-  - [ok] soft mute - play sample in buffer with decreasing volume
-  - [ok] hard mute - using ADF's HAL
-  - [ok] Startup: do not start parsing on samples to codec before sample ring buffer hits requested buffer size.
-  - [ok] Start from empty buffer
-  - [ ] fill in missing component descriptions in Readme.md
-  - [ok] DAC latency setting from android app
+- [ ] fill in missing component descriptions in Readme.md
