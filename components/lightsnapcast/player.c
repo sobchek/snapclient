@@ -202,9 +202,6 @@ static esp_err_t player_setup_i2s(i2s_port_t i2sNum,
   }
 #endif
 
-  ESP_LOGI(TAG, "player_setup_i2s: dma_buf_len is %ld, dma_buf_count is %ld",
-           i2sDmaBufMaxLen, i2sDmaBufCnt);
-
   if (tx_chan) {
     my_i2s_channel_disable(tx_chan);
     i2s_del_channel(tx_chan);
@@ -235,53 +232,57 @@ static esp_err_t player_setup_i2s(i2s_port_t i2sNum,
     bits = I2S_DATA_BIT_WIDTH_16BIT;
   }
 
+  ESP_LOGI(TAG,
+           "player_setup_i2s: dma_buf_len is %ld, dma_buf_count is %ld, sample "
+           "rate: %ld, bits: %d",
+           i2sDmaBufMaxLen, i2sDmaBufCnt, sr, bits);
+
   i2s_std_clk_config_t i2s_clkcfg = {
-      .sample_rate_hz = sr,
+    .sample_rate_hz = sr,
 #if CONFIG_USE_SAMPLE_INSERTION
-      .clk_src = I2S_CLK_SRC_DEFAULT,
+    .clk_src = I2S_CLK_SRC_DEFAULT,
 #else
-      .clk_src = I2S_CLK_SRC_APLL,
+    .clk_src = I2S_CLK_SRC_APLL,
 #endif
-      .mclk_multiple = I2S_MCLK_MULTIPLE_256,
+    .mclk_multiple = I2S_MCLK_MULTIPLE_256,
   };
   i2s_std_config_t tx_std_cfg = {
-      .clk_cfg = i2s_clkcfg,
+    .clk_cfg = i2s_clkcfg,
 #if CONFIG_I2S_USE_MSB_FORMAT
-      .slot_cfg =
-          I2S_STD_MSB_SLOT_DEFAULT_CONFIG(setting->bits, I2S_SLOT_MODE_STEREO),
+    .slot_cfg =
+        I2S_STD_MSB_SLOT_DEFAULT_CONFIG(setting->bits, I2S_SLOT_MODE_STEREO),
 #else
-      .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(setting->bits,
-                                                      I2S_SLOT_MODE_STEREO),
+    .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(bits, I2S_SLOT_MODE_STEREO),
 #endif
-      .gpio_cfg =
-          {
-              .mclk = pin_config0.mck_io_num,
-              .bclk = pin_config0.bck_io_num,
-              .ws = pin_config0.ws_io_num,
-              .dout = pin_config0.data_out_num,
-              .din = pin_config0.data_in_num,
-              .invert_flags =
-                  {
+    .gpio_cfg =
+        {
+            .mclk = pin_config0.mck_io_num,
+            .bclk = pin_config0.bck_io_num,
+            .ws = pin_config0.ws_io_num,
+            .dout = pin_config0.data_out_num,
+            .din = pin_config0.data_in_num,
+            .invert_flags =
+                {
 #if CONFIG_INVERT_MCLK_LEVEL
-                      .mclk_inv = true,
+                    .mclk_inv = true,
 
 #else
-                      .mclk_inv = false,
+                    .mclk_inv = false,
 #endif
 
 #if CONFIG_INVERT_BCLK_LEVEL
-                      .bclk_inv = true,
+                    .bclk_inv = true,
 #else
-                      .bclk_inv = false,
+                    .bclk_inv = false,
 #endif
 
 #if CONFIG_INVERT_WORD_SELECT_LEVEL
-                      .ws_inv = true,
+                    .ws_inv = true,
 #else
-                      .ws_inv = false,
+                    .ws_inv = false,
 #endif
-                  },
-          },
+                },
+        },
   };
 
   ESP_ERROR_CHECK(i2s_channel_init_std_mode(tx_chan, &tx_std_cfg));
@@ -1419,37 +1420,6 @@ static void player_task(void *pvParameters) {
 
           // get actual age after alarm
           age = (int64_t)timer_val - (-age);
-
-          // check if we need to write remaining data
-          if (size != 0) {
-            do {
-              written = 0;
-              if (i2s_custom_write(I2S_NUM_0, p_payload, (size_t)size, &written,
-                                   portMAX_DELAY) != ESP_OK) {
-                ESP_LOGE(TAG, "i2s_playback_task: I2S write error");
-              }
-              if (written < size) {
-                ESP_LOGE(TAG,
-                         "i2s_playback_task: I2S didn't "
-                         "write all data");
-              }
-              size -= written;
-              p_payload += written;
-
-              if (size == 0) {
-                if (fragment->nextFragment != NULL) {
-                  fragment = fragment->nextFragment;
-                  p_payload = fragment->payload;
-                  size = fragment->size;
-                } else {
-                  free_pcm_chunk(chnk);
-                  chnk = NULL;
-
-                  break;
-                }
-              }
-            } while (1);
-          }
 
           initialSync = 1;
 

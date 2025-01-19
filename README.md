@@ -25,7 +25,7 @@ which made it impossible to get good results for multiroom syncing.
 
 ### Codebase
 
-The codebase is split into components and build on <b>ESP-IDF v5.1.1</b>. I still
+The codebase is split into components and build on <b>ESP-IDF v5.1.5</b>. I still
 have some refactoring on the todo list as the concept has started to settle and
 allow for new features can be added in a structured manner. In the code you
 will find parts that are only partly related features and still not on the task
@@ -112,13 +112,13 @@ git clone https://github.com/CarlosDerSeher/snapclient
 cd snapclient
 ```
 
-Update third party code (opus, flac and esp-dsp):
+Update third party code (opus, flac, esp-dsp, improv_wifi):
 ```
 git submodule update --init
 ```
 
 ### ESP-IDF environnement configuration
-- <b>If you're on Windows :</b> Install [ESP-IDF v5.1.1](https://github.com/espressif/esp-idf/releases/tag/v5.1.1) locally ([More info](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/get-started/windows-setup-update.html)).
+- <b>If you're on Windows :</b> Install [ESP-IDF v5.1.5](https://github.com/espressif/esp-idf/releases/tag/v5.1.5) locally ([More info](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/get-started/windows-setup-update.html)).
 - <b>If you're on Linux (docker) :</b> Use the image for ESP-IDF by following [docker build](doc/docker_build.md) doc
 - <b>If you're on Linux :</b> follow [official Espressif](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/get-started/linux-macos-setup.html) instructions
   For debian based systems you'll need to do the following:
@@ -126,7 +126,7 @@ git submodule update --init
   sudo apt-get install git wget flex bison gperf python3 python3-pip python3-venv cmake ninja-build ccache libffi-dev libssl-dev dfu-util libusb-1.0-0
   mkdir -p ~/esp
   cd ~/esp
-  git clone -b v5.1.1 --recursive https://github.com/espressif/esp-idf.git
+  git clone -b v5.1.5 --recursive https://github.com/espressif/esp-idf.git
   cd ~/esp/esp-idf
   ./install.sh esp32
   . ./export.sh
@@ -196,7 +196,7 @@ Setup a snapcast server on your network
 
 On a linux box:
 
-Clone snapcast build and start the server
+Install [Snapcast](https://github.com/badaix/snapcast) and start the server. You won't need the following command if you installed it as a service.
 
     ./snapserver
 
