@@ -17,6 +17,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "freertos/task.h"
+#include "hal/gpio_types.h"
 #if CONFIG_SNAPCLIENT_USE_INTERNAL_ETHERNET || \
     CONFIG_SNAPCLIENT_USE_SPI_ETHERNET
 #include "eth_interface.h"
@@ -537,9 +538,10 @@ static void http_get_task(void *pvParameters) {
       }
     }
 
-    if (r->addr) {
-      ip_addr_copy(remote_ip, (r->addr->addr));
-      remote_ip.type = IPADDR_TYPE_V4;
+    mdns_ip_addr_t *a = r->addr;
+    if (a) {
+      ip_addr_copy(remote_ip, (a->addr));
+      remote_ip.type = a->addr.type;
       remotePort = r->port;
       ESP_LOGI(TAG, "Found %s:%d", ipaddr_ntoa(&remote_ip), remotePort);
 
@@ -2528,11 +2530,6 @@ void app_main(void) {
     gpio_set_level(pin_config0.data_out_num, 0);
     gpio_set_level(pin_config0.bck_io_num, 0);
     gpio_set_level(pin_config0.ws_io_num, 0);
-
-    gpioCfg.pin_bit_mask = BIT64(pin_config0.data_in_num);
-    gpioCfg.mode = GPIO_MODE_INPUT;
-    gpioCfg.pull_up_en = GPIO_PULLUP_ENABLE;
-    gpio_config(&gpioCfg);
   }
 
 #if CONFIG_SNAPCLIENT_USE_INTERNAL_ETHERNET || \
