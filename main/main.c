@@ -256,7 +256,7 @@ static FLAC__StreamDecoderReadStatus read_callback(
     const FLAC__StreamDecoder *decoder, FLAC__byte buffer[], size_t *bytes,
     void *client_data) {
   snapcastSetting_t *scSet = (snapcastSetting_t *)client_data;
-  decoderData_t *flacData;
+  //  decoderData_t *flacData;
 
   (void)scSet;
 
@@ -458,7 +458,6 @@ static void http_get_task(void *pvParameters) {
   uint16_t remotePort = 0;
   int rc1 = ERR_OK, rc2 = ERR_OK;
   struct netbuf *firstNetBuf = NULL;
-  struct netbuf *newNetBuf = NULL;
   uint16_t len;
   uint64_t timeout = FAST_SYNC_LATENCY_BUF;
   char *codecString = NULL;
@@ -690,8 +689,7 @@ static void http_get_task(void *pvParameters) {
     scSet.muted = true;
 
     uint64_t startTime, endTime;
-    int32_t remainderSize = 0;
-    size_t currentPos = 0;
+    //    size_t currentPos = 0;
     size_t typedMsgCurrentPos = 0;
     uint32_t typedMsgLen = 0;
     uint32_t offset = 0;
@@ -729,7 +727,7 @@ static void http_get_task(void *pvParameters) {
       // now parse the data
       netbuf_first(firstNetBuf);
       do {
-        currentPos = 0;
+        // currentPos = 0;
 
         rc1 = netbuf_data(firstNetBuf, (void **)&start, &len);
         if (rc1 == ERR_OK) {
@@ -901,7 +899,7 @@ static void http_get_task(void *pvParameters) {
                   break;
               }
 
-              currentPos++;
+              // currentPos++;++;
               len--;
               start++;
 
@@ -918,12 +916,14 @@ static void http_get_task(void *pvParameters) {
 
                       typedMsgCurrentPos++;
                       start++;
-                      currentPos++;
+                      // currentPos++;
                       len--;
 
                       internalState++;
 
-                      break;
+                      if (len == 0) {
+                        break;
+                      }
                     }
 
                     case 1: {
@@ -931,12 +931,14 @@ static void http_get_task(void *pvParameters) {
 
                       typedMsgCurrentPos++;
                       start++;
-                      currentPos++;
+                      // currentPos++;
                       len--;
 
                       internalState++;
 
-                      break;
+                      if (len == 0) {
+                        break;
+                      }
                     }
 
                     case 2: {
@@ -944,12 +946,14 @@ static void http_get_task(void *pvParameters) {
 
                       typedMsgCurrentPos++;
                       start++;
-                      currentPos++;
+                      // currentPos++;
                       len--;
 
                       internalState++;
 
-                      break;
+                      if (len == 0) {
+                        break;
+                      }
                     }
 
                     case 3: {
@@ -961,12 +965,14 @@ static void http_get_task(void *pvParameters) {
 
                       typedMsgCurrentPos++;
                       start++;
-                      currentPos++;
+                      // currentPos++;
                       len--;
 
                       internalState++;
 
-                      break;
+                      if (len == 0) {
+                        break;
+                      }
                     }
 
                     case 4: {
@@ -974,12 +980,14 @@ static void http_get_task(void *pvParameters) {
 
                       typedMsgCurrentPos++;
                       start++;
-                      currentPos++;
+                      // currentPos++;
                       len--;
 
                       internalState++;
 
-                      break;
+                      if (len == 0) {
+                        break;
+                      }
                     }
 
                     case 5: {
@@ -987,12 +995,14 @@ static void http_get_task(void *pvParameters) {
 
                       typedMsgCurrentPos++;
                       start++;
-                      currentPos++;
+                      // currentPos++;
                       len--;
 
                       internalState++;
 
-                      break;
+                      if (len == 0) {
+                        break;
+                      }
                     }
 
                     case 6: {
@@ -1000,12 +1010,14 @@ static void http_get_task(void *pvParameters) {
 
                       typedMsgCurrentPos++;
                       start++;
-                      currentPos++;
+                      // currentPos++;
                       len--;
 
                       internalState++;
 
-                      break;
+                      if (len == 0) {
+                        break;
+                      }
                     }
 
                     case 7: {
@@ -1017,12 +1029,14 @@ static void http_get_task(void *pvParameters) {
 
                       typedMsgCurrentPos++;
                       start++;
-                      currentPos++;
+                      // currentPos++;
                       len--;
 
                       internalState++;
 
-                      break;
+                      if (len == 0) {
+                        break;
+                      }
                     }
 
                     case 8: {
@@ -1030,12 +1044,14 @@ static void http_get_task(void *pvParameters) {
 
                       typedMsgCurrentPos++;
                       start++;
-                      currentPos++;
+                      // currentPos++;
                       len--;
 
                       internalState++;
 
-                      break;
+                      if (len == 0) {
+                        break;
+                      }
                     }
 
                     case 9: {
@@ -1043,12 +1059,14 @@ static void http_get_task(void *pvParameters) {
 
                       typedMsgCurrentPos++;
                       start++;
-                      currentPos++;
+                      // currentPos++;
                       len--;
 
                       internalState++;
 
-                      break;
+                      if (len == 0) {
+                        break;
+                      }
                     }
 
                     case 10: {
@@ -1056,12 +1074,14 @@ static void http_get_task(void *pvParameters) {
 
                       typedMsgCurrentPos++;
                       start++;
-                      currentPos++;
+                      // currentPos++;
                       len--;
 
                       internalState++;
 
-                      break;
+                      if (len == 0) {
+                        break;
+                      }
                     }
 
                     case 11: {
@@ -1069,7 +1089,7 @@ static void http_get_task(void *pvParameters) {
 
                       typedMsgCurrentPos++;
                       start++;
-                      currentPos++;
+                      // currentPos++;
                       len--;
 
                       internalState++;
@@ -1097,7 +1117,9 @@ static void http_get_task(void *pvParameters) {
                                              wire_chnk.timestamp.usec);
 #endif
 
-                      break;
+                      if (len == 0) {
+                        break;
+                      }
                     }
 
                     case 12: {
@@ -1134,7 +1156,6 @@ static void http_get_task(void *pvParameters) {
                               }
 
                               tmpData = 0;
-                              remainderSize = 0;
                               payloadDataShift = 3;
                               payloadOffset = 0;
                             }
@@ -1195,7 +1216,7 @@ static void http_get_task(void *pvParameters) {
 
                       typedMsgCurrentPos += tmp_size;
                       start += tmp_size;
-                      currentPos += tmp_size;
+                      // currentPos += tmp_size;
                       len -= tmp_size;
 
                       if (typedMsgCurrentPos >= base_message_rx.size) {
@@ -1519,12 +1540,14 @@ static void http_get_task(void *pvParameters) {
 
                       typedMsgCurrentPos++;
                       start++;
-                      currentPos++;
+                      // currentPos++;
                       len--;
 
                       internalState++;
 
-                      break;
+                      if (len == 0) {
+                        break;
+                      }
                     }
 
                     case 1: {
@@ -1532,12 +1555,14 @@ static void http_get_task(void *pvParameters) {
 
                       typedMsgCurrentPos++;
                       start++;
-                      currentPos++;
+                      // currentPos++;
                       len--;
 
                       internalState++;
 
-                      break;
+                      if (len == 0) {
+                        break;
+                      }
                     }
 
                     case 2: {
@@ -1545,12 +1570,14 @@ static void http_get_task(void *pvParameters) {
 
                       typedMsgCurrentPos++;
                       start++;
-                      currentPos++;
+                      // currentPos++;
                       len--;
 
                       internalState++;
 
-                      break;
+                      if (len == 0) {
+                        break;
+                      }
                     }
 
                     case 3: {
@@ -1574,12 +1601,14 @@ static void http_get_task(void *pvParameters) {
 
                       typedMsgCurrentPos++;
                       start++;
-                      currentPos++;
+                      // currentPos++;
                       len--;
 
                       internalState++;
 
-                      break;
+                      if (len == 0) {
+                        break;
+                      }
                     }
 
                     case 4: {
@@ -1590,7 +1619,7 @@ static void http_get_task(void *pvParameters) {
 
                         typedMsgCurrentPos += typedMsgLen;
                         start += typedMsgLen;
-                        currentPos += typedMsgLen;
+                        // currentPos += typedMsgLen;
                         len -= typedMsgLen;
                       } else {
                         memcpy(&codecString[offset], start, typedMsgLen);
@@ -1599,7 +1628,7 @@ static void http_get_task(void *pvParameters) {
 
                         typedMsgCurrentPos += len;
                         start += len;
-                        currentPos += len;
+                        // currentPos += len;
                         len -= len;
                       }
 
@@ -1635,7 +1664,9 @@ static void http_get_task(void *pvParameters) {
                         internalState++;
                       }
 
-                      break;
+                      if (len == 0) {
+                        break;
+                      }
                     }
 
                     case 5: {
@@ -1643,12 +1674,14 @@ static void http_get_task(void *pvParameters) {
 
                       typedMsgCurrentPos++;
                       start++;
-                      currentPos++;
+                      // currentPos++;
                       len--;
 
                       internalState++;
 
-                      break;
+                      if (len == 0) {
+                        break;
+                      }
                     }
 
                     case 6: {
@@ -1656,12 +1689,14 @@ static void http_get_task(void *pvParameters) {
 
                       typedMsgCurrentPos++;
                       start++;
-                      currentPos++;
+                      // currentPos++;
                       len--;
 
                       internalState++;
 
-                      break;
+                      if (len == 0) {
+                        break;
+                      }
                     }
 
                     case 7: {
@@ -1669,12 +1704,14 @@ static void http_get_task(void *pvParameters) {
 
                       typedMsgCurrentPos++;
                       start++;
-                      currentPos++;
+                      // currentPos++;
                       len--;
 
                       internalState++;
 
-                      break;
+                      if (len == 0) {
+                        break;
+                      }
                     }
 
                     case 8: {
@@ -1694,12 +1731,14 @@ static void http_get_task(void *pvParameters) {
 
                       typedMsgCurrentPos++;
                       start++;
-                      currentPos++;
+                      // currentPos++;
                       len--;
 
                       internalState++;
 
-                      break;
+                      if (len == 0) {
+                        break;
+                      }
                     }
 
                     case 9: {
@@ -1710,7 +1749,7 @@ static void http_get_task(void *pvParameters) {
 
                         typedMsgCurrentPos += typedMsgLen;
                         start += typedMsgLen;
-                        currentPos += typedMsgLen;
+                        // currentPos += typedMsgLen;
                         len -= typedMsgLen;
                       } else {
                         memcpy(&codecPayload[offset], start, len);
@@ -1719,7 +1758,7 @@ static void http_get_task(void *pvParameters) {
 
                         typedMsgCurrentPos += len;
                         start += len;
-                        currentPos += len;
+                        // currentPos += len;
                         len -= len;
                       }
 
@@ -1869,49 +1908,18 @@ static void http_get_task(void *pvParameters) {
                 case SNAPCAST_MESSAGE_SERVER_SETTINGS: {
                   switch (internalState) {
                     case 0: {
-                      while ((netbuf_len(firstNetBuf) - currentPos) <
-                             base_message_rx.size) {
-                        ESP_LOGI(TAG, "need more data");
+                      typedMsgLen = *start & 0xFF;
 
-                        // we need more data to process
-                        rc1 = netconn_recv(lwipNetconn, &newNetBuf);
-                        if (rc1 != ERR_OK) {
-                          ESP_LOGE(TAG, "rx error for need more data");
+                      typedMsgCurrentPos++;
+                      start++;
+                      // currentPos++;
+                      len--;
 
-                          if (rc1 == ERR_CONN) {
-                            // netconn_close(lwipNetconn);
-                            // closing later, see first
-                            // netconn_recv() in the loop
+                      internalState++;
 
-                            break;
-                          }
-
-                          if (newNetBuf != NULL) {
-                            netbuf_delete(newNetBuf);
-
-                            newNetBuf = NULL;
-                          }
-
-                          continue;
-                        }
-
-                        netbuf_chain(firstNetBuf, newNetBuf);
+                      if (len == 0) {
+                        break;
                       }
-
-                      if (rc1 == ERR_OK) {
-                        typedMsgLen = *start & 0xFF;
-
-                        typedMsgCurrentPos++;
-                        start++;
-                        currentPos++;
-                        len--;
-
-                        internalState++;
-                      } else {
-                        ESP_LOGE(TAG, "some error");
-                      }
-
-                      break;
                     }
 
                     case 1: {
@@ -1919,12 +1927,14 @@ static void http_get_task(void *pvParameters) {
 
                       typedMsgCurrentPos++;
                       start++;
-                      currentPos++;
+                      // currentPos++;
                       len--;
 
                       internalState++;
 
-                      break;
+                      if (len == 0) {
+                        break;
+                      }
                     }
 
                     case 2: {
@@ -1932,144 +1942,153 @@ static void http_get_task(void *pvParameters) {
 
                       typedMsgCurrentPos++;
                       start++;
-                      currentPos++;
+                      // currentPos++;
                       len--;
 
                       internalState++;
 
-                      break;
+                      if (len == 0) {
+                        break;
+                      }
                     }
 
                     case 3: {
                       typedMsgLen |= (*start & 0xFF) << 24;
 
-                      //                       ESP_LOGI(TAG,
-                      //                       "server settings string is %d
-                      //                       long", typedMsgLen);
+                      // ESP_LOGI(TAG,"server settings string is %lu"
+                      //              " long", typedMsgLen);
 
-                      typedMsgCurrentPos++;
-                      start++;
-                      currentPos++;
-                      len--;
-
-                      internalState++;
-
-                      break;
-                    }
-
-                    case 4: {
                       // now get some memory for server settings
-                      // string at this point there is still
-                      // plenty of RAM available, so we use
-                      // malloc and netbuf_copy() here
+                      // string
                       serverSettingsString = malloc(typedMsgLen + 1);
-
                       if (serverSettingsString == NULL) {
                         ESP_LOGE(TAG,
                                  "couldn't get memory for "
                                  "server settings string");
-                      } else {
-                        netbuf_copy_partial(firstNetBuf, serverSettingsString,
-                                            typedMsgLen, currentPos);
-
-                        serverSettingsString[typedMsgLen] =
-                            0;  // NULL terminate string
-
-                        // ESP_LOGI
-                        //(TAG, "got string: %s", tmp);
-
-                        result = server_settings_message_deserialize(
-                            &server_settings_message, serverSettingsString);
-                        if (result) {
-                          ESP_LOGE(TAG,
-                                   "Failed to read server "
-                                   "settings: %d",
-                                   result);
-                        } else {
-                          // log mute state, buffer, latency
-                          ESP_LOGI(TAG, "Buffer length:  %ld",
-                                   server_settings_message.buffer_ms);
-                          ESP_LOGI(TAG, "Latency:        %ld",
-                                   server_settings_message.latency);
-                          ESP_LOGI(TAG, "Mute:           %d",
-                                   server_settings_message.muted);
-                          ESP_LOGI(TAG, "Setting volume: %ld",
-                                   server_settings_message.volume);
-                        }
-
-                        // Volume setting using ADF HAL
-                        // abstraction
-                        if (scSet.muted != server_settings_message.muted) {
-#if SNAPCAST_USE_SOFT_VOL
-                          if (server_settings_message.muted) {
-                            dsp_processor_set_volome(0.0);
-                          } else {
-                            dsp_processor_set_volome(
-                                (double)server_settings_message.volume / 100);
-                          }
-#endif
-                          audio_hal_set_mute(board_handle->audio_hal,
-                                             server_settings_message.muted);
-                        }
-
-                        if (scSet.volume != server_settings_message.volume) {
-#if SNAPCAST_USE_SOFT_VOL
-                          if (!server_settings_message.muted) {
-                            dsp_processor_set_volome(
-                                (double)server_settings_message.volume / 100);
-                          }
-#else
-                          audio_hal_set_volume(board_handle->audio_hal,
-                                               server_settings_message.volume);
-#endif
-                        }
-
-                        scSet.cDacLat_ms = server_settings_message.latency;
-                        scSet.buf_ms = server_settings_message.buffer_ms;
-                        scSet.muted = server_settings_message.muted;
-                        scSet.volume = server_settings_message.volume;
-
-                        if (player_send_snapcast_setting(&scSet) != pdPASS) {
-                          ESP_LOGE(TAG,
-                                   "Failed to notify sync task. "
-                                   "Did you init player?");
-
-                          return;
-                        }
-
-                        free(serverSettingsString);
-                        serverSettingsString = NULL;
                       }
 
+                      typedMsgCurrentPos++;
+                      start++;
+                      // currentPos++;
+                      len--;
+
                       internalState++;
-                      // fall through
+
+                      offset = 0;
+
+                      if (len == 0) {
+                        break;
+                      }
                     }
 
-                    case 5: {
+                    case 4: {
                       size_t tmpSize =
                           base_message_rx.size - typedMsgCurrentPos;
 
                       if (len > 0) {
                         if (tmpSize < len) {
+                          if (serverSettingsString) {
+                            memcpy(&serverSettingsString[offset], start,
+                                   tmpSize);
+                          }
+                          offset += tmpSize;
+
                           start += tmpSize;
-                          currentPos += tmpSize;  // will be
-                                                  // incremented by 1
-                                                  // later so -1 here
+                          // currentPos += tmpSize;  // will be
+                          //  incremented by 1
+                          //  later so -1 here
                           typedMsgCurrentPos += tmpSize;
                           len -= tmpSize;
                         } else {
+                          if (serverSettingsString) {
+                            memcpy(&serverSettingsString[offset], start, len);
+                          }
+                          offset += len;
+
                           start += len;
-                          currentPos += len;  // will be incremented
-                                              // by 1 later so -1
-                                              // here
+                          // currentPos += len;  // will be incremented
+                          //  by 1 later so -1
+                          //  here
                           typedMsgCurrentPos += len;
                           len = 0;
                         }
                       }
 
                       if (typedMsgCurrentPos >= base_message_rx.size) {
-                        // ESP_LOGI(TAG,
-                        // "done server settings");
+                        if (serverSettingsString) {
+                          // ESP_LOGI(TAG, "done server settings %lu/%lu",
+                          //								offset,
+                          //								typedMsgLen);
+
+                          // NULL terminate string
+                          serverSettingsString[typedMsgLen] = 0;
+
+                          // ESP_LOGI(TAG, "got string: %s",
+                          // serverSettingsString);
+
+                          result = server_settings_message_deserialize(
+                              &server_settings_message, serverSettingsString);
+                          if (result) {
+                            ESP_LOGE(TAG,
+                                     "Failed to read server "
+                                     "settings: %d",
+                                     result);
+                          } else {
+                            // log mute state, buffer, latency
+                            ESP_LOGI(TAG, "Buffer length:  %ld",
+                                     server_settings_message.buffer_ms);
+                            ESP_LOGI(TAG, "Latency:        %ld",
+                                     server_settings_message.latency);
+                            ESP_LOGI(TAG, "Mute:           %d",
+                                     server_settings_message.muted);
+                            ESP_LOGI(TAG, "Setting volume: %ld",
+                                     server_settings_message.volume);
+                          }
+
+                          // Volume setting using ADF HAL
+                          // abstraction
+                          if (scSet.muted != server_settings_message.muted) {
+#if SNAPCAST_USE_SOFT_VOL
+                            if (server_settings_message.muted) {
+                              dsp_processor_set_volome(0.0);
+                            } else {
+                              dsp_processor_set_volome(
+                                  (double)server_settings_message.volume / 100);
+                            }
+#endif
+                            audio_hal_set_mute(board_handle->audio_hal,
+                                               server_settings_message.muted);
+                          }
+
+                          if (scSet.volume != server_settings_message.volume) {
+#if SNAPCAST_USE_SOFT_VOL
+                            if (!server_settings_message.muted) {
+                              dsp_processor_set_volome(
+                                  (double)server_settings_message.volume / 100);
+                            }
+#else
+                            audio_hal_set_volume(
+                                board_handle->audio_hal,
+                                server_settings_message.volume);
+#endif
+                          }
+
+                          scSet.cDacLat_ms = server_settings_message.latency;
+                          scSet.buf_ms = server_settings_message.buffer_ms;
+                          scSet.muted = server_settings_message.muted;
+                          scSet.volume = server_settings_message.volume;
+
+                          if (player_send_snapcast_setting(&scSet) != pdPASS) {
+                            ESP_LOGE(TAG,
+                                     "Failed to notify sync task. "
+                                     "Did you init player?");
+
+                            return;
+                          }
+
+                          free(serverSettingsString);
+                          serverSettingsString = NULL;
+                        }
 
                         state = BASE_MESSAGE_STATE;
                         internalState = 0;
@@ -2097,12 +2116,12 @@ static void http_get_task(void *pvParameters) {
 
                   if (tmpSize < len) {
                     start += tmpSize;
-                    currentPos += tmpSize;
+                    // currentPos += tmpSize;
                     typedMsgCurrentPos += tmpSize;
                     len -= tmpSize;
                   } else {
                     start += len;
-                    currentPos += len;
+                    // currentPos += len;
 
                     typedMsgCurrentPos += len;
                     len = 0;
@@ -2131,12 +2150,14 @@ static void http_get_task(void *pvParameters) {
 
                       typedMsgCurrentPos++;
                       start++;
-                      currentPos++;
+                      // currentPos++;
                       len--;
 
                       internalState++;
 
-                      break;
+                      if (len == 0) {
+                        break;
+                      }
                     }
 
                     case 1: {
@@ -2144,12 +2165,14 @@ static void http_get_task(void *pvParameters) {
 
                       typedMsgCurrentPos++;
                       start++;
-                      currentPos++;
+                      // currentPos++;
                       len--;
 
                       internalState++;
 
-                      break;
+                      if (len == 0) {
+                        break;
+                      }
                     }
 
                     case 2: {
@@ -2157,12 +2180,14 @@ static void http_get_task(void *pvParameters) {
 
                       typedMsgCurrentPos++;
                       start++;
-                      currentPos++;
+                      // currentPos++;
                       len--;
 
                       internalState++;
 
-                      break;
+                      if (len == 0) {
+                        break;
+                      }
                     }
 
                     case 3: {
@@ -2170,12 +2195,14 @@ static void http_get_task(void *pvParameters) {
 
                       typedMsgCurrentPos++;
                       start++;
-                      currentPos++;
+                      // currentPos++;
                       len--;
 
                       internalState++;
 
-                      break;
+                      if (len == 0) {
+                        break;
+                      }
                     }
 
                     case 4: {
@@ -2183,12 +2210,14 @@ static void http_get_task(void *pvParameters) {
 
                       typedMsgCurrentPos++;
                       start++;
-                      currentPos++;
+                      // currentPos++;
                       len--;
 
                       internalState++;
 
-                      break;
+                      if (len == 0) {
+                        break;
+                      }
                     }
 
                     case 5: {
@@ -2196,12 +2225,14 @@ static void http_get_task(void *pvParameters) {
 
                       typedMsgCurrentPos++;
                       start++;
-                      currentPos++;
+                      // currentPos++;
                       len--;
 
                       internalState++;
 
-                      break;
+                      if (len == 0) {
+                        break;
+                      }
                     }
 
                     case 6: {
@@ -2209,12 +2240,14 @@ static void http_get_task(void *pvParameters) {
 
                       typedMsgCurrentPos++;
                       start++;
-                      currentPos++;
+                      // currentPos++;
                       len--;
 
                       internalState++;
 
-                      break;
+                      if (len == 0) {
+                        break;
+                      }
                     }
 
                     case 7: {
@@ -2222,7 +2255,7 @@ static void http_get_task(void *pvParameters) {
 
                       typedMsgCurrentPos++;
                       start++;
-                      currentPos++;
+                      // currentPos++;
                       len--;
                       if (typedMsgCurrentPos >= base_message_rx.size) {
                         // ESP_LOGI(TAG, "done time message");
@@ -2340,7 +2373,7 @@ static void http_get_task(void *pvParameters) {
                 default: {
                   typedMsgCurrentPos++;
                   start++;
-                  currentPos++;
+                  // currentPos++;
                   len--;
 
                   if (typedMsgCurrentPos >= base_message_rx.size) {
