@@ -175,10 +175,10 @@ setup_rtp_i2s ()
 {
   i2s_config_t i2s_config = {
     .mode = I2S_MODE_MASTER | I2S_MODE_TX, // Only TX
-    .sample_rate = 48000,
-    .bits_per_sample = 32,
+    .sample_rate = 44100,
+    .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
     .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT, // 2-channels
-    .communication_format = I2S_COMM_FORMAT_STAND_I2S,
+    .communication_format = I2S_COMM_FORMAT_I2S_MSB,
     .dma_buf_count = 8,
     .dma_buf_len = 480,
     //.intr_alloc_flags = 1, //Default interrupt priority
